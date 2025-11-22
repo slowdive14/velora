@@ -99,7 +99,8 @@ export default function App() {
           noiseSuppression: true,
           autoGainControl: true,
           channelCount: 1,
-          sampleRate: 16000 // Prefer 16k if possible
+          autoGainControl: true,
+          channelCount: 1
         },
       });
 
@@ -531,6 +532,12 @@ export default function App() {
 
     // 3. Use AudioWorklet to capture mic
     const source = ctx.createMediaStreamSource(streamRef.current);
+
+    // High-Pass Filter to remove low-frequency rumble/handling noise (common on mobile)
+    const highPassFilter = ctx.createBiquadFilter();
+    highPassFilter.type = 'highpass';
+    highPassFilter.frequency.value = 100; // Cut off below 100Hz
+
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor');
 
     worklet.port.onmessage = (event) => {
@@ -545,7 +552,10 @@ export default function App() {
       liveServiceRef.current?.sendAudioChunk(inputData);
     };
 
-    source.connect(worklet);
+    // Connect Graph: Source -> HPF -> Worklet
+    source.connect(highPassFilter);
+    highPassFilter.connect(worklet);
+
     // Keep worklet alive
     const muteNode = ctx.createGain();
     muteNode.gain.value = 0;
