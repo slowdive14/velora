@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key } from 'lucide-react';
 import { LiveService } from './services/liveService';
 import { Message, ConnectionStatus } from './types';
-import { blobToBase64 } from './utils/audioUtils';
+import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
 
 // --- Audio Worklet Code (Blob) ---
 // We buffer ~4096 samples (approx 250ms at 16kHz).
@@ -365,9 +365,7 @@ export default function App() {
 
   const setupAudioContext = async () => {
     // Native 16kHz context prevents resampling artifacts and improves connection stability
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
-      sampleRate: 16000,
-    });
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     await ctx.resume();
 
     // Load AudioWorklet
@@ -519,7 +517,14 @@ export default function App() {
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor');
 
     worklet.port.onmessage = (event) => {
-      const inputData = event.data as Float32Array;
+      let inputData = event.data as Float32Array;
+
+      // CRITICAL: Mobile browsers (iOS) often ignore sampleRate: 16000.
+      // We must downsample manually if the context is running at a different rate (e.g. 44.1k/48k).
+      if (ctx.sampleRate !== 16000) {
+        inputData = downsampleTo16k(inputData, ctx.sampleRate);
+      }
+
       liveServiceRef.current?.sendAudioChunk(inputData);
     };
 
