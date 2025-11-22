@@ -1,0 +1,8 @@
+{
+  "name": "Gemini Cast",
+  "description": "Your personal AI podcast co-host. Record videos with real-time AI prompts and interactions.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
