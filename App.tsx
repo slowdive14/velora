@@ -1151,9 +1151,21 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* Version Indicator */}
-      <div className="fixed bottom-2 right-2 text-[10px] text-white/20 pointer-events-none z-50">
-        v2.0 (Diff UI)
+      {/* Version Indicator & Debug */}
+      <div className="fixed bottom-2 right-2 flex flex-col items-end gap-2 pointer-events-none z-50">
+        <div className="text-[10px] text-white/20">v2.1 (Auto-Open)</div>
+        <button
+          onClick={() => enterPracticeMode({
+            original: "I think AI is the most useful invention of all time in humanity.",
+            corrected: "I think AI is the most useful invention of all time for humanity.",
+            explanation: "Use 'for humanity' to express benefit to mankind.",
+            timestamp: Date.now(),
+            aiContext: "That's a bold statement! Let's refine that preposition."
+          })}
+          className="pointer-events-auto bg-red-500/20 hover:bg-red-500/40 text-red-200 text-xs px-2 py-1 rounded border border-red-500/30 transition-colors"
+        >
+          Test UI
+        </button>
       </div>
     </div>
   );
