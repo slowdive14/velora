@@ -58,6 +58,8 @@ export default function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const aiAudioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const playbackDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const renderLoopRef = useRef<number | null>(null);
 
@@ -410,6 +412,15 @@ export default function App() {
     const ctx = await setupAudioContext();
     audioContextRef.current = ctx;
     aiAudioDestinationRef.current = ctx.createMediaStreamDestination();
+
+    // Create a destination for playback (speakers/earphones)
+    // We route this to an HTML <audio> element to ensure mobile browsers respect system audio routing (Bluetooth/Headset)
+    playbackDestinationRef.current = ctx.createMediaStreamDestination();
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.srcObject = playbackDestinationRef.current.stream;
+      playbackAudioRef.current.play().catch(e => console.error("Playback failed", e));
+    }
+
     nextStartTimeRef.current = 0;
 
     // 2. Connect to Gemini
@@ -420,9 +431,15 @@ export default function App() {
         if (!audioContextRef.current) return;
         const source = audioContextRef.current.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioContextRef.current.destination); // Speakers
+
+        // Connect to Playback Destination (which goes to <audio> element)
+        if (playbackDestinationRef.current) {
+          source.connect(playbackDestinationRef.current);
+        }
+
+        // Connect to Recording Stream
         if (aiAudioDestinationRef.current) {
-          source.connect(aiAudioDestinationRef.current); // Recording Stream
+          source.connect(aiAudioDestinationRef.current);
         }
 
         const now = audioContextRef.current.currentTime;
@@ -818,6 +835,9 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* Hidden Audio Element for Mobile Routing */}
+      <audio ref={playbackAudioRef} hidden playsInline />
 
       {!hasApiKey && showApiKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
