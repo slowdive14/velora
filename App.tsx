@@ -98,8 +98,6 @@ export default function App() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          channelCount: 1,
-          autoGainControl: true,
           channelCount: 1
         },
       });
