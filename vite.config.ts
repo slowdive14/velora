@@ -17,19 +17,31 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['vite.svg'],
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+        },
         manifest: {
-          name: 'Velora',
+          name: 'Velora - AI English Tutor',
           short_name: 'Velora',
-          description: 'AI English Tutor',
+          description: 'AI-powered English conversation practice',
           theme_color: '#09090b',
           background_color: '#09090b',
           display: 'standalone',
           orientation: 'landscape',
+          start_url: '/velora/',
+          scope: '/velora/',
           icons: [
             {
               src: 'vite.svg',
-              sizes: '192x192',
-              type: 'image/svg+xml'
+              sizes: 'any',
+              type: 'image/svg+xml',
+              purpose: 'any'
+            },
+            {
+              src: 'vite.svg',
+              sizes: '512x512',
+              type: 'image/svg+xml',
+              purpose: 'maskable'
             }
           ]
         }
