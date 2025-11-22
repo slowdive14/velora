@@ -972,60 +972,31 @@ export default function App() {
         />
       ))}
 
-      {/* Practice Mode View (Full Screen) */}
+      {/* Practice Mode Overlay */}
       {isPracticeMode && currentPractice && (
-        <div className="fixed inset-0 z-[150] bg-neutral-950 flex flex-col animate-fadeIn overflow-y-auto">
-          <div className="w-full max-w-7xl mx-auto p-6 md:p-12 flex flex-col gap-8 h-full justify-center">
+        <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-fadeIn">
+          <div className="max-w-5xl w-full bg-[#09090b] border border-white/10 rounded-3xl p-8 shadow-2xl flex flex-col gap-8 max-h-[90vh] overflow-y-auto">
 
-            {/* Header */}
-            <div className="flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
-                  <Smartphone className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-3xl font-bold text-white tracking-tight">Practice Mode</h2>
-                  <p className="text-neutral-400">Review and improve your expression</p>
-                </div>
-              </div>
-              <button
-                onClick={exitPracticeMode}
-                className="w-12 h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/10"
-              >
-                <span className="text-white text-2xl">×</span>
-              </button>
+            {/* 1. Topic Initiation (Top) */}
+            <div className="text-center space-y-2">
+              <span className="text-xs font-bold text-violet-400 tracking-widest uppercase">Current Topic</span>
+              <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight">
+                "Do you think AI will solve more problems than it creates?"
+              </h2>
             </div>
 
-            {/* Main Content Grid */}
-            <div className="flex-1 flex flex-col gap-8 justify-center min-h-0">
+            {/* Comparison Area */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
 
-              {/* AI Context (Top) */}
-              {currentPractice.aiContext && (
-                <div className="p-8 bg-violet-500/5 border border-violet-500/20 rounded-3xl">
-                  <span className="text-sm font-bold text-violet-400 uppercase tracking-wider mb-3 block flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-violet-400" />
-                    Context (AI Said)
-                  </span>
-                  <p className="text-2xl md:text-3xl text-violet-100 font-medium leading-relaxed">
-                    "{currentPractice.aiContext}"
-                  </p>
-                </div>
-              )}
-
-              {/* Comparison Grid (Side by Side) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 grow-0">
-
-                {/* Original (Left) */}
-                <div className="p-8 bg-red-500/5 border border-red-500/10 rounded-3xl flex flex-col">
-                  <span className="text-sm font-bold text-red-400 uppercase tracking-wider mb-4 block flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-400" />
-                    You Said
-                  </span>
-                  <p className="text-2xl text-gray-300 leading-relaxed">
+              {/* 2. User Speech (Left Grey Bubble) */}
+              <div className="flex flex-col gap-3">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">You Said</span>
+                <div className="bg-[#27272a] rounded-3xl rounded-tl-none p-6 relative group">
+                  <p className="text-xl text-gray-300 leading-relaxed font-medium">
                     {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
                       if (part.type === 'removed') {
                         return (
-                          <span key={i} className="bg-red-500/20 text-red-300 px-1.5 rounded-lg mx-0.5 line-through decoration-red-400/50 decoration-2">
+                          <span key={i} className="text-red-400 bg-red-500/10 px-1 rounded mx-0.5 line-through decoration-red-400/50 decoration-2">
                             {part.value}
                           </span>
                         );
@@ -1036,22 +1007,26 @@ export default function App() {
                       return null;
                     })}
                   </p>
-                </div>
-
-                {/* Corrected (Right) */}
-                <div className="p-8 bg-green-500/5 border border-green-500/10 rounded-3xl flex flex-col relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-8 opacity-10">
-                    <Play className="w-32 h-32 text-green-500" />
+                  {/* Listening Indicator (Visual only for now) */}
+                  <div className="absolute bottom-4 right-6 flex items-center gap-2 opacity-50">
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                    <span className="text-xs text-gray-400 font-medium">Recorded</span>
                   </div>
-                  <span className="text-sm font-bold text-green-400 uppercase tracking-wider mb-4 block flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-400" />
-                    Try Saying
-                  </span>
-                  <p className="text-2xl md:text-3xl text-white font-bold leading-relaxed z-10">
+                </div>
+              </div>
+
+              {/* 4. AI Correction (Right Blue Bubble) */}
+              <div className="flex flex-col gap-3">
+                <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider ml-1">Try Saying This</span>
+                <div className="bg-[#1e3a8a] rounded-3xl rounded-tr-none p-6 shadow-[0_0_40px_-10px_rgba(30,58,138,0.5)] relative overflow-hidden">
+                  {/* Shine Effect */}
+                  <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
+
+                  <p className="text-xl text-white leading-relaxed font-medium relative z-10">
                     {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
                       if (part.type === 'added') {
                         return (
-                          <span key={i} className="bg-green-500/20 text-green-300 px-1.5 rounded-lg mx-0.5 border-b-2 border-green-500/50">
+                          <span key={i} className="text-green-300 font-bold bg-green-500/20 px-1 rounded mx-0.5">
                             {part.value}
                           </span>
                         );
@@ -1064,32 +1039,37 @@ export default function App() {
                   </p>
                 </div>
               </div>
+            </div>
 
-              {/* Explanation (Bottom) */}
-              <div className="p-6 bg-neutral-900 border border-white/5 rounded-2xl flex items-start gap-4">
-                <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center mt-1 shrink-0">
-                  <span className="text-violet-400 text-xs font-bold">i</span>
-                </div>
-                <p className="text-lg text-gray-400 leading-relaxed">
-                  <span className="text-gray-200 font-semibold mr-2">Why:</span>
+            {/* 5. Contextual Feedback (Tip Section) */}
+            <div className="bg-violet-500/10 border border-violet-500/20 rounded-2xl p-6 flex items-start gap-4">
+              <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
+                <span className="text-violet-300 font-bold text-sm">TIP</span>
+              </div>
+              <div className="space-y-1">
+                <p className="text-violet-200 text-lg font-medium">
                   {currentPractice.explanation}
+                </p>
+                <p className="text-violet-400/60 text-sm">
+                  Improved phrasing and word choice for clarity and flow.
                 </p>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-6 mt-auto shrink-0">
+            <div className="flex gap-4 mt-auto pt-4 border-t border-white/5">
               <button
                 onClick={exitPracticeMode}
-                className="flex-1 px-8 py-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-lg font-semibold transition-all"
+                className="flex-1 px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
               >
-                Got It
+                Close
               </button>
               <button
                 onClick={exitPracticeMode}
-                className="flex-[2] px-8 py-5 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white text-lg font-bold transition-all shadow-xl shadow-violet-900/20"
+                className="flex-1 px-8 py-4 rounded-xl bg-white text-black font-bold hover:scale-[1.02] transition-all shadow-xl flex items-center justify-center gap-2"
               >
-                Continue Chat
+                <Play className="w-4 h-4 fill-current" />
+                Practice Speaking
               </button>
             </div>
           </div>
@@ -1174,6 +1154,10 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* Version Indicator */}
+      <div className="fixed bottom-2 right-2 text-[10px] text-white/20 pointer-events-none z-50">
+        v2.0 (Diff UI)
+      </div>
     </div>
   );
 }
