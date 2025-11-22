@@ -352,8 +352,12 @@ export default function App() {
     }
     lines.push(currentLine);
 
-    // Position: Centered vertically
-    const totalHeight = lines.length * lineHeight;
+    // Limit to last 3 lines (User Request: "current question and front/back only")
+    const maxLines = 3;
+    const visibleLines = lines.slice(-maxLines);
+
+    // Position: Centered vertically (or slightly lower for subtitles)
+    const totalHeight = visibleLines.length * lineHeight;
     const startY = (height - totalHeight) / 2;
 
     // Draw Text with subtle shadow
@@ -363,7 +367,7 @@ export default function App() {
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 2;
 
-    lines.forEach((line, i) => {
+    visibleLines.forEach((line, i) => {
       ctx.fillText(line, width / 2, startY + (i * lineHeight));
     });
 
@@ -580,8 +584,14 @@ export default function App() {
         console.log("Tool Correction Received:", correction);
 
         // Add context from recent AI speech if available
+        // Extract last 2 sentences for better context (User Request: "AI answer should change topic")
         if (!correction.aiContext && aiTranscriptBufferRef.current) {
-          correction.aiContext = aiTranscriptBufferRef.current;
+          const text = aiTranscriptBufferRef.current.trim();
+          // Split by sentence endings (. ? !)
+          const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+          // Take last 2 sentences
+          const recentContext = sentences.slice(-2).join(' ').trim();
+          correction.aiContext = recentContext || text;
         }
 
         // Add to corrections list
@@ -934,7 +944,7 @@ export default function App() {
             <div className="text-center space-y-2">
               <span className="text-xs font-bold text-violet-400 tracking-widest uppercase">Current Topic</span>
               <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight">
-                "Do you think AI will solve more problems than it creates?"
+                "{currentPractice.aiContext || "Conversation Practice"}"
               </h2>
             </div>
 

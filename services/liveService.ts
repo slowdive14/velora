@@ -154,7 +154,7 @@ export class LiveService {
               corrected: args.corrected,
               explanation: args.explanation,
               timestamp: Date.now(),
-              aiContext: "Correction reported via tool" // Placeholder, context is hard to get here
+              aiContext: "" // Leave empty so App.tsx can populate from transcript buffer
             };
             this.config.onCorrection(correction);
 
