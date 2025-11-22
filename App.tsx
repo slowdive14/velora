@@ -3,6 +3,7 @@ import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileT
 import { LiveService } from './services/liveService';
 import { Message, ConnectionStatus, Correction } from './types';
 import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
+import { diffWords } from './utils/diffUtils';
 
 // --- Audio Worklet Code (Blob) ---
 // We buffer ~4096 samples (approx 250ms at 16kHz).
@@ -577,7 +578,9 @@ export default function App() {
                   original: correctionData.original,
                   corrected: correctionData.correction,
                   explanation: correctionData.explanation,
-                  timestamp: Date.now()
+                  timestamp: Date.now(),
+                  // Use the cleaned buffer (without JSON) as context
+                  aiContext: aiTranscriptBufferRef.current.replace(jsonStr, '').trim()
                 };
 
                 // Add to corrections list
@@ -972,9 +975,10 @@ export default function App() {
       {/* Practice Mode Overlay */}
       {isPracticeMode && currentPractice && (
         <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-8 animate-fadeIn">
-          <div className="max-w-2xl w-full bg-neutral-900/50 border border-violet-500/20 rounded-3xl p-8 shadow-2xl backdrop-blur-xl">
+          <div className="max-w-4xl w-full bg-neutral-900/50 border border-violet-500/20 rounded-3xl p-8 shadow-2xl backdrop-blur-xl flex flex-col gap-6">
+
             {/* Header */}
-            <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-white">Practice This</h2>
               <button
                 onClick={exitPracticeMode}
@@ -984,41 +988,81 @@ export default function App() {
               </button>
             </div>
 
-            {/* Correction Display */}
-            <div className="space-y-6 mb-8">
-              {/* Original */}
-              <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-2xl">
-                <span className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2 block">
-                  What you said
+            {/* AI Context (Top) */}
+            {currentPractice.aiContext && (
+              <div className="p-6 bg-violet-500/10 border border-violet-500/20 rounded-2xl">
+                <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-2 block">
+                  AI Said
                 </span>
-                <p className="text-2xl text-red-300 line-through">
-                  {currentPractice.original}
+                <p className="text-lg text-violet-100 font-medium leading-relaxed">
+                  "{currentPractice.aiContext}"
+                </p>
+              </div>
+            )}
+
+            {/* Comparison Grid (Side by Side) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+              {/* Original (Left) */}
+              <div className="p-6 bg-red-500/5 border border-red-500/20 rounded-2xl h-full">
+                <span className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3 block">
+                  You Said
+                </span>
+                <p className="text-xl text-gray-300 leading-relaxed">
+                  {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                    if (part.type === 'removed') {
+                      return (
+                        <span key={i} className="bg-red-500/20 text-red-300 px-1 rounded mx-0.5 line-through decoration-red-400/50">
+                          {part.value}
+                        </span>
+                      );
+                    }
+                    if (part.type === 'equal') {
+                      return <span key={i}>{part.value} </span>;
+                    }
+                    return null;
+                  })}
                 </p>
               </div>
 
-              {/* Corrected */}
-              <div className="p-6 bg-green-500/10 border border-green-500/30 rounded-2xl">
-                <span className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2 block">
-                  Try saying
+              {/* Corrected (Right) */}
+              <div className="p-6 bg-green-500/5 border border-green-500/20 rounded-2xl h-full">
+                <span className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3 block">
+                  Try Saying
                 </span>
-                <p className="text-3xl text-green-300 font-bold">
-                  {currentPractice.corrected}
+                <p className="text-xl text-white font-medium leading-relaxed">
+                  {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                    if (part.type === 'added') {
+                      return (
+                        <span key={i} className="bg-green-500/20 text-green-300 px-1 rounded mx-0.5 border-b-2 border-green-500/50">
+                          {part.value}
+                        </span>
+                      );
+                    }
+                    if (part.type === 'equal') {
+                      return <span key={i}>{part.value} </span>;
+                    }
+                    return null;
+                  })}
                 </p>
               </div>
+            </div>
 
-              {/* Explanation */}
-              <div className="p-4 bg-violet-500/10 border border-violet-500/20 rounded-xl">
-                <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-1 block">
-                  Why
-                </span>
-                <p className="text-sm text-violet-200">
+            {/* Explanation (Bottom) */}
+            <div className="p-4 bg-neutral-800/50 border border-white/5 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center mt-0.5 shrink-0">
+                  <span className="text-violet-400 text-xs font-bold">i</span>
+                </div>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  <span className="text-gray-300 font-semibold mr-2">Why:</span>
                   {currentPractice.explanation}
                 </p>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-4">
+            <div className="flex gap-4 mt-2">
               <button
                 onClick={exitPracticeMode}
                 className="flex-1 px-6 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"

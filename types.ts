@@ -26,4 +26,5 @@ export interface Correction {
   corrected: string;
   explanation: string;
   timestamp: number;
+  aiContext?: string; // The AI's response text surrounding this correction
 }
