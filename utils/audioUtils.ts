@@ -27,7 +27,7 @@ export async function decodeAudioData(
 ): Promise<AudioBuffer> {
   const inputInt16 = new Int16Array(data.buffer);
   const float32 = new Float32Array(inputInt16.length);
-  
+
   for (let i = 0; i < inputInt16.length; i++) {
     float32[i] = inputInt16[i] / 32768.0;
   }
@@ -49,7 +49,7 @@ export function float32ToInt16PCM(float32: Float32Array): ArrayBuffer {
     // Convert to 16-bit PCM
     const val = s < 0 ? s * 0x8000 : s * 0x7FFF;
     // Write as Little Endian
-    view.setInt16(i * 2, val, true); 
+    view.setInt16(i * 2, val, true);
   }
   return buffer;
 }
@@ -76,15 +76,18 @@ export function downsampleTo16k(input: Float32Array, sourceSampleRate: number): 
   const result = new Float32Array(newLength);
 
   for (let i = 0; i < newLength; i++) {
-    const originalIndex = i * ratio;
-    const index1 = Math.floor(originalIndex);
-    const index2 = Math.ceil(originalIndex);
-    const fraction = originalIndex - index1;
+    const startOffset = Math.floor(i * ratio);
+    const endOffset = Math.floor((i + 1) * ratio);
+    let sum = 0;
+    let count = 0;
 
-    const val1 = input[index1] || 0;
-    const val2 = input[index2] || val1; 
+    for (let j = startOffset; j < endOffset && j < input.length; j++) {
+      sum += input[j];
+      count++;
+    }
 
-    result[i] = val1 + (val2 - val1) * fraction;
+    // Block averaging acts as a simple low-pass filter to prevent aliasing
+    result[i] = count > 0 ? sum / count : 0;
   }
 
   return result;
