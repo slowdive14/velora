@@ -972,106 +972,122 @@ export default function App() {
         />
       ))}
 
-      {/* Practice Mode Overlay */}
+      {/* Practice Mode View (Full Screen) */}
       {isPracticeMode && currentPractice && (
-        <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-8 animate-fadeIn">
-          <div className="max-w-4xl w-full bg-neutral-900/50 border border-violet-500/20 rounded-3xl p-8 shadow-2xl backdrop-blur-xl flex flex-col gap-6">
+        <div className="fixed inset-0 z-[150] bg-neutral-950 flex flex-col animate-fadeIn overflow-y-auto">
+          <div className="w-full max-w-7xl mx-auto p-6 md:p-12 flex flex-col gap-8 h-full justify-center">
 
             {/* Header */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-white">Practice This</h2>
+            <div className="flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                  <Smartphone className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-3xl font-bold text-white tracking-tight">Practice Mode</h2>
+                  <p className="text-neutral-400">Review and improve your expression</p>
+                </div>
+              </div>
               <button
                 onClick={exitPracticeMode}
-                className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+                className="w-12 h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/10"
               >
-                <span className="text-white text-xl">×</span>
+                <span className="text-white text-2xl">×</span>
               </button>
             </div>
 
-            {/* AI Context (Top) */}
-            {currentPractice.aiContext && (
-              <div className="p-6 bg-violet-500/10 border border-violet-500/20 rounded-2xl">
-                <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-2 block">
-                  AI Said
-                </span>
-                <p className="text-lg text-violet-100 font-medium leading-relaxed">
-                  "{currentPractice.aiContext}"
-                </p>
+            {/* Main Content Grid */}
+            <div className="flex-1 flex flex-col gap-8 justify-center min-h-0">
+
+              {/* AI Context (Top) */}
+              {currentPractice.aiContext && (
+                <div className="p-8 bg-violet-500/5 border border-violet-500/20 rounded-3xl">
+                  <span className="text-sm font-bold text-violet-400 uppercase tracking-wider mb-3 block flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-violet-400" />
+                    Context (AI Said)
+                  </span>
+                  <p className="text-2xl md:text-3xl text-violet-100 font-medium leading-relaxed">
+                    "{currentPractice.aiContext}"
+                  </p>
+                </div>
+              )}
+
+              {/* Comparison Grid (Side by Side) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 grow-0">
+
+                {/* Original (Left) */}
+                <div className="p-8 bg-red-500/5 border border-red-500/10 rounded-3xl flex flex-col">
+                  <span className="text-sm font-bold text-red-400 uppercase tracking-wider mb-4 block flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-400" />
+                    You Said
+                  </span>
+                  <p className="text-2xl text-gray-300 leading-relaxed">
+                    {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                      if (part.type === 'removed') {
+                        return (
+                          <span key={i} className="bg-red-500/20 text-red-300 px-1.5 rounded-lg mx-0.5 line-through decoration-red-400/50 decoration-2">
+                            {part.value}
+                          </span>
+                        );
+                      }
+                      if (part.type === 'equal') {
+                        return <span key={i}>{part.value} </span>;
+                      }
+                      return null;
+                    })}
+                  </p>
+                </div>
+
+                {/* Corrected (Right) */}
+                <div className="p-8 bg-green-500/5 border border-green-500/10 rounded-3xl flex flex-col relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <Play className="w-32 h-32 text-green-500" />
+                  </div>
+                  <span className="text-sm font-bold text-green-400 uppercase tracking-wider mb-4 block flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-400" />
+                    Try Saying
+                  </span>
+                  <p className="text-2xl md:text-3xl text-white font-bold leading-relaxed z-10">
+                    {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                      if (part.type === 'added') {
+                        return (
+                          <span key={i} className="bg-green-500/20 text-green-300 px-1.5 rounded-lg mx-0.5 border-b-2 border-green-500/50">
+                            {part.value}
+                          </span>
+                        );
+                      }
+                      if (part.type === 'equal') {
+                        return <span key={i}>{part.value} </span>;
+                      }
+                      return null;
+                    })}
+                  </p>
+                </div>
               </div>
-            )}
 
-            {/* Comparison Grid (Side by Side) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-              {/* Original (Left) */}
-              <div className="p-6 bg-red-500/5 border border-red-500/20 rounded-2xl h-full">
-                <span className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3 block">
-                  You Said
-                </span>
-                <p className="text-xl text-gray-300 leading-relaxed">
-                  {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
-                    if (part.type === 'removed') {
-                      return (
-                        <span key={i} className="bg-red-500/20 text-red-300 px-1 rounded mx-0.5 line-through decoration-red-400/50">
-                          {part.value}
-                        </span>
-                      );
-                    }
-                    if (part.type === 'equal') {
-                      return <span key={i}>{part.value} </span>;
-                    }
-                    return null;
-                  })}
-                </p>
-              </div>
-
-              {/* Corrected (Right) */}
-              <div className="p-6 bg-green-500/5 border border-green-500/20 rounded-2xl h-full">
-                <span className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3 block">
-                  Try Saying
-                </span>
-                <p className="text-xl text-white font-medium leading-relaxed">
-                  {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
-                    if (part.type === 'added') {
-                      return (
-                        <span key={i} className="bg-green-500/20 text-green-300 px-1 rounded mx-0.5 border-b-2 border-green-500/50">
-                          {part.value}
-                        </span>
-                      );
-                    }
-                    if (part.type === 'equal') {
-                      return <span key={i}>{part.value} </span>;
-                    }
-                    return null;
-                  })}
-                </p>
-              </div>
-            </div>
-
-            {/* Explanation (Bottom) */}
-            <div className="p-4 bg-neutral-800/50 border border-white/5 rounded-xl">
-              <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center mt-0.5 shrink-0">
+              {/* Explanation (Bottom) */}
+              <div className="p-6 bg-neutral-900 border border-white/5 rounded-2xl flex items-start gap-4">
+                <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center mt-1 shrink-0">
                   <span className="text-violet-400 text-xs font-bold">i</span>
                 </div>
-                <p className="text-sm text-gray-400 leading-relaxed">
-                  <span className="text-gray-300 font-semibold mr-2">Why:</span>
+                <p className="text-lg text-gray-400 leading-relaxed">
+                  <span className="text-gray-200 font-semibold mr-2">Why:</span>
                   {currentPractice.explanation}
                 </p>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-4 mt-2">
+            <div className="flex gap-6 mt-auto shrink-0">
               <button
                 onClick={exitPracticeMode}
-                className="flex-1 px-6 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
+                className="flex-1 px-8 py-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-lg font-semibold transition-all"
               >
                 Got It
               </button>
               <button
                 onClick={exitPracticeMode}
-                className="flex-1 px-6 py-4 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-semibold transition-all shadow-[0_0_30px_-5px_rgba(139,92,246,0.5)]"
+                className="flex-[2] px-8 py-5 rounded-2xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white text-lg font-bold transition-all shadow-xl shadow-violet-900/20"
               >
                 Continue Chat
               </button>
