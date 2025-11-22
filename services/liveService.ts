@@ -1,10 +1,12 @@
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Tool } from '@google/genai';
 import { base64ToUint8Array, decodeAudioData, float32ToInt16PCM, arrayBufferToBase64 } from '../utils/audioUtils';
+import { Correction } from '../types';
 
 interface LiveServiceConfig {
   apiKey: string;
   onAudioData: (buffer: AudioBuffer) => void;
   onTranscript: (text: string, isUser: boolean, isFinal: boolean) => void;
+  onCorrection: (correction: Correction) => void;
   onClose: () => void;
   onError: (error: Error) => void;
 }
@@ -32,19 +34,16 @@ export class LiveService {
           4. **CRITICAL INSTRUCTION**: You must act as a "Shadow Corrector".
              - When the user makes a grammar, vocabulary, or pronunciation mistake, you MUST:
                a) **Verbally**: Respond naturally, using the *correct* phrasing in your response (Implicit Recasting). Do NOT explicitly say "You made a mistake".
-               b) **Textually**: Output a JSON object on a NEW LINE representing the correction.
-          
-          5. **JSON FORMAT (Strictly Follow)**:
-             If you detect ANY mistake, you MUST append this JSON on a new line after your text response:
-             {"original":"(the user's incorrect phrase)","correction":"(your corrected version)","explanation":"(brief 1-sentence reason)"}
+               b) **Function Call**: Call the 'reportCorrection' tool immediately.
 
-          6. **Example Interaction**:
-             User: "I goed to the store yesterday."
-             AI: "Oh, you **went** to the store? What did you buy?"
-             {"original":"I goed to the store","correction":"I went to the store","explanation":"'Go' is an irregular verb, past tense is 'went'."}
+          5. **Tool Use (Strictly Follow)**:
+             If you detect ANY mistake, you MUST call the 'reportCorrection' tool with:
+             - original: The user's incorrect phrase.
+             - corrected: Your corrected version.
+             - explanation: A brief 1-sentence reason.
 
-          7. Keep your verbal responses concise (under 15 seconds).
-          8. Be friendly, supportive, and curious.`;
+          6. Keep your verbal responses concise (under 15 seconds).
+          7. Be friendly, supportive, and curious.`;
 
       if (studyMaterial && studyMaterial.trim().length > 0) {
         systemInstruction = `You are a strict but helpful English tutor. 
@@ -56,17 +55,37 @@ export class LiveService {
         Your goal is to check their understanding and help them practice speaking about this specific text.
         1. Start by asking them to summarize the text in their own words.
         2. Ask deep follow-up questions to test their comprehension and critical thinking about the material.
-        3. Explicitly correct their grammar and pronunciation mistakes in a supportive way, and provide short segments for them to repeat to practice pronunciation.
+        3. Explicitly correct their grammar and pronunciation mistakes using the 'reportCorrection' tool.
         4. Keep the conversation focused on the study material.
-        5. Keep your responses concise.
-        6. When discussing topics with multiple sub-topics, ensure the user has sufficiently elaborated on a specific point before moving to the next.`;
+        5. Keep your responses concise.`;
       }
+
+      const tools: Tool[] = [
+        {
+          functionDeclarations: [
+            {
+              name: "reportCorrection",
+              description: "Report a grammar, vocabulary, or pronunciation mistake made by the user.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  original: { type: "STRING", description: "The user's original incorrect phrase" },
+                  corrected: { type: "STRING", description: "The corrected version of the phrase" },
+                  explanation: { type: "STRING", description: "A brief explanation of the error" }
+                },
+                required: ["original", "corrected", "explanation"]
+              }
+            }
+          ]
+        }
+      ];
 
       this.session = await this.ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
+          tools: tools,
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
           },
@@ -86,7 +105,6 @@ export class LiveService {
           },
           onerror: (err: ErrorEvent) => {
             console.error('Gemini Live Error', err);
-            // If error occurs, mark as disconnected to prevent loops
             this.isConnected = false;
             this.config.onError(new Error('Connection error'));
           },
@@ -117,6 +135,38 @@ export class LiveService {
     if (outputTranscript) {
       this.config.onTranscript(outputTranscript.text, false, !!message.serverContent?.turnComplete);
     }
+
+    // Handle Tool Calls
+    const toolCall = message.toolCall;
+    if (toolCall) {
+      console.log("Tool Call Received:", toolCall);
+      toolCall.functionCalls.forEach(fc => {
+        if (fc.name === 'reportCorrection') {
+          const args = fc.args as any;
+          if (args.original && args.corrected && args.explanation) {
+            const correction: Correction = {
+              original: args.original,
+              corrected: args.corrected,
+              explanation: args.explanation,
+              timestamp: Date.now(),
+              aiContext: "Correction reported via tool" // Placeholder, context is hard to get here
+            };
+            this.config.onCorrection(correction);
+
+            // We must respond to the tool call to keep the session alive
+            this.session.sendToolResponse({
+              functionResponses: [
+                {
+                  id: fc.id,
+                  name: fc.name,
+                  response: { result: "Correction logged successfully" }
+                }
+              ]
+            });
+          }
+        }
+      });
+    }
   }
 
   async sendAudioChunk(audioData: Float32Array) {
@@ -135,7 +185,6 @@ export class LiveService {
       });
     } catch (e) {
       console.error("Error sending audio", e);
-      // If sending fails, do not trigger global onError to avoid loops, just log it
     }
   }
 
@@ -149,7 +198,7 @@ export class LiveService {
         },
       });
     } catch (e) {
-      // Fail silently for video frames to avoid spamming log
+      // Fail silently
     }
   }
 

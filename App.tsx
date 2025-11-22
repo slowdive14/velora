@@ -556,67 +556,8 @@ export default function App() {
           }
         } else {
           // AI Transcript Logic:
-          // AI streams delta tokens. We must buffer them to detect JSON that spans multiple chunks.
-          // Pattern: {"original":"...","correction":"...","explanation":"..."}
-
-          // 1. Append new chunk to the raw buffer (used for JSON detection)
+          // AI streams delta tokens. Just append.
           aiTranscriptBufferRef.current += text;
-
-          // 2. Check if we have a complete JSON object in the buffer
-          // We look for the pattern { ... "original" ... }
-          const jsonPattern = /\{[\s\S]*?"original"[\s\S]*?"correction"[\s\S]*?"explanation"[\s\S]*?\}/;
-          const match = aiTranscriptBufferRef.current.match(jsonPattern);
-
-          if (match) {
-            const jsonStr = match[0];
-            try {
-              const correctionData = JSON.parse(jsonStr);
-              console.log("Parsed correction:", correctionData);
-
-              if (correctionData.original && correctionData.correction && correctionData.explanation) {
-                const newCorrection: Correction = {
-                  original: correctionData.original,
-                  corrected: correctionData.correction,
-                  explanation: correctionData.explanation,
-                  timestamp: Date.now(),
-                  // Use the cleaned buffer (without JSON) as context
-                  aiContext: aiTranscriptBufferRef.current.replace(jsonStr, '').trim()
-                };
-
-                // Add to corrections list
-                correctionsRef.current = [...correctionsRef.current, newCorrection];
-                setCorrections(prev => [...prev, newCorrection]);
-
-                // Auto-trigger Practice Mode (User Request: "Output directly on screen")
-                enterPracticeMode(newCorrection);
-
-                // Remove JSON from the buffer so it doesn't get parsed again
-                // AND remove it from the display text
-                aiTranscriptBufferRef.current = aiTranscriptBufferRef.current.replace(jsonStr, '').trim();
-
-                // Also clean up the current subtitle if the JSON leaked into it
-                // (This is tricky because currentSubtitleRef is cumulative, but we can try to clean it)
-                currentSubtitleRef.current = currentSubtitleRef.current.replace(jsonStr, '').trim();
-              }
-            } catch (e) {
-              // JSON might be incomplete, wait for more chunks
-              // console.log("Waiting for more JSON chunks...");
-            }
-          }
-
-          // 3. Update display text
-          // We only want to show text that is NOT part of a JSON object.
-          // Simple heuristic: If it looks like we are building a JSON object, don't show it yet.
-          // However, for responsiveness, we usually show everything. 
-          // A better approach for the USER is: Show everything, but if we detect JSON later, remove it (retroactively).
-          // Since we already cleaned `currentSubtitleRef` above, we just need to append the NEW text here,
-          // BUT we should be careful not to re-append the JSON part if we just removed it.
-
-          // Strategy: Re-build currentSubtitle from the cleaned buffer
-          // This ensures that once JSON is removed from buffer, it's gone from screen.
-          // But we need to be careful about "committed" vs "streaming" text if we were separating them.
-          // Here, AI text is just one long stream.
-
           currentSubtitleRef.current = aiTranscriptBufferRef.current;
         }
 
@@ -634,6 +575,21 @@ export default function App() {
             aiTranscriptBufferRef.current = "";
           }
         }
+      },
+      onCorrection: (correction: Correction) => {
+        console.log("Tool Correction Received:", correction);
+
+        // Add context from recent AI speech if available
+        if (!correction.aiContext && aiTranscriptBufferRef.current) {
+          correction.aiContext = aiTranscriptBufferRef.current;
+        }
+
+        // Add to corrections list
+        correctionsRef.current = [...correctionsRef.current, correction];
+        setCorrections(prev => [...prev, correction]);
+
+        // Auto-trigger Practice Mode
+        enterPracticeMode(correction);
       },
       onClose: () => {
         setStatus('disconnected');
