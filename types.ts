@@ -20,3 +20,10 @@ export interface Message {
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface Correction {
+  original: string;
+  corrected: string;
+  explanation: string;
+  timestamp: number;
+}

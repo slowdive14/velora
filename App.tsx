@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key, Smartphone } from 'lucide-react';
 import { LiveService } from './services/liveService';
-import { Message, ConnectionStatus } from './types';
+import { Message, ConnectionStatus, Correction } from './types';
 import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
 
 // --- Audio Worklet Code (Blob) ---
@@ -46,8 +46,12 @@ export default function App() {
   const [isCameraOn, setIsCameraOn] = useState(false); // Default to Camera OFF
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
   const [studyMaterial, setStudyMaterial] = useState(""); // New State for user material
+  const [corrections, setCorrections] = useState<Correction[]>([]);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [currentPractice, setCurrentPractice] = useState<Correction | null>(null);
   const isCameraOnRef = useRef(false);
   const isRecordingRef = useRef(false);
+  const correctionsRef = useRef<Correction[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -166,6 +170,18 @@ export default function App() {
         });
       }
     }
+  };
+
+  // --- Practice Mode Functions ---
+
+  const enterPracticeMode = (correction: Correction) => {
+    setIsPracticeMode(true);
+    setCurrentPractice(correction);
+  };
+
+  const exitPracticeMode = () => {
+    setIsPracticeMode(false);
+    setCurrentPractice(null);
   };
 
   // --- Canvas Rendering Logic ---
@@ -497,9 +513,43 @@ export default function App() {
           }
         } else {
           // AI Transcript Logic:
-          // AI streams delta tokens. Just append.
-          currentSubtitleRef.current += text;
-          aiTranscriptBufferRef.current += text;
+          // AI may send correction JSON mixed with text
+          // Pattern: {"original":"...","correction":"...","explanation":"..."}
+
+          let displayText = text;
+
+          // Detect and extract JSON corrections
+          const jsonPattern = /\{[\s\S]*?"original"[\s\S]*?"correction"[\s\S]*?"explanation"[\s\S]*?\}/g;
+          const matches = text.match(jsonPattern);
+
+          if (matches) {
+            matches.forEach(jsonStr => {
+              try {
+                const correctionData = JSON.parse(jsonStr);
+                if (correctionData.original && correctionData.correction && correctionData.explanation) {
+                  const newCorrection: Correction = {
+                    original: correctionData.original,
+                    corrected: correctionData.correction,
+                    explanation: correctionData.explanation,
+                    timestamp: Date.now()
+                  };
+
+                  // Add to corrections list
+                  correctionsRef.current = [...correctionsRef.current, newCorrection];
+                  setCorrections(prev => [...prev, newCorrection]);
+
+                  // Remove JSON from display text
+                  displayText = displayText.replace(jsonStr, '').trim();
+                }
+              } catch (e) {
+                // Invalid JSON, ignore
+              }
+            });
+          }
+
+          // AI streams delta tokens. Just append (cleaned text)
+          currentSubtitleRef.current += displayText;
+          aiTranscriptBufferRef.current += displayText;
         }
 
         if (isFinal && !isUser) {
@@ -846,6 +896,111 @@ export default function App() {
 
       {/* Hidden Audio Element for Mobile Routing */}
       <audio ref={playbackAudioRef} hidden playsInline />
+
+      {/* Correction Pills - Show last 3 corrections */}
+      {!isPracticeMode && corrections.slice(-3).map((correction, idx) => {
+        const age = Date.now() - correction.timestamp;
+        const isVisible = age < 8000; // Auto-hide after 8 seconds
+
+        if (!isVisible) return null;
+
+        return (
+          <button
+            key={correction.timestamp}
+            onClick={() => enterPracticeMode(correction)}
+            className="fixed bottom-24 right-6 pointer-events-auto bg-black/70 backdrop-blur-xl border border-violet-500/30 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:scale-105 transition-all group animate-slide-in"
+            style={{
+              bottom: `${96 + idx * 80}px`,
+              animation: 'slideInRight 0.3s ease-out'
+            }}
+          >
+            {/* Original (strikethrough) */}
+            <span className="text-red-300 line-through text-sm opacity-70 font-medium">
+              {correction.original}
+            </span>
+
+            {/* Arrow */}
+            <span className="text-gray-500 text-xs">→</span>
+
+            {/* Corrected */}
+            <span className="text-green-400 font-bold text-sm">
+              {correction.corrected}
+            </span>
+
+            {/* Practice Icon */}
+            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-2 group-hover:bg-violet-500 transition-colors">
+              <Play className="w-3 h-3" />
+            </div>
+          </button>
+        );
+      })}
+
+      {/* Practice Mode Overlay */}
+      {isPracticeMode && currentPractice && (
+        <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-8 animate-fadeIn">
+          <div className="max-w-2xl w-full bg-neutral-900/50 border border-violet-500/20 rounded-3xl p-8 shadow-2xl backdrop-blur-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-2xl font-bold text-white">Practice This</h2>
+              <button
+                onClick={exitPracticeMode}
+                className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+              >
+                <span className="text-white text-xl">×</span>
+              </button>
+            </div>
+
+            {/* Correction Display */}
+            <div className="space-y-6 mb-8">
+              {/* Original */}
+              <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-2xl">
+                <span className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2 block">
+                  What you said
+                </span>
+                <p className="text-2xl text-red-300 line-through">
+                  {currentPractice.original}
+                </p>
+              </div>
+
+              {/* Corrected */}
+              <div className="p-6 bg-green-500/10 border border-green-500/30 rounded-2xl">
+                <span className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2 block">
+                  Try saying
+                </span>
+                <p className="text-3xl text-green-300 font-bold">
+                  {currentPractice.corrected}
+                </p>
+              </div>
+
+              {/* Explanation */}
+              <div className="p-4 bg-violet-500/10 border border-violet-500/20 rounded-xl">
+                <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-1 block">
+                  Why
+                </span>
+                <p className="text-sm text-violet-200">
+                  {currentPractice.explanation}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-4">
+              <button
+                onClick={exitPracticeMode}
+                className="flex-1 px-6 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
+              >
+                Got It
+              </button>
+              <button
+                onClick={exitPracticeMode}
+                className="flex-1 px-6 py-4 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-semibold transition-all shadow-[0_0_30px_-5px_rgba(139,92,246,0.5)]"
+              >
+                Continue Chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Portrait Mode Warning Overlay */}
       <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center md:hidden portrait:flex hidden">
