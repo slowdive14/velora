@@ -35,6 +35,48 @@ class PCMProcessor extends AudioWorkletProcessor {
 registerProcessor('pcm-processor', PCMProcessor);
 `;
 
+// --- Components ---
+
+const CorrectionPill: React.FC<{ correction: Correction; index: number; onOpen: () => void }> = ({ correction, index, onOpen }) => {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(false), 8000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <button
+      onClick={onOpen}
+      className="fixed right-6 z-50 pointer-events-auto bg-black/70 backdrop-blur-xl border border-violet-500/30 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:scale-105 transition-all group animate-slide-in"
+      style={{
+        bottom: `${96 + index * 80}px`,
+        animation: 'slideInRight 0.3s ease-out'
+      }}
+    >
+      {/* Original (strikethrough) */}
+      <span className="text-red-300 line-through text-sm opacity-70 font-medium">
+        {correction.original}
+      </span>
+
+      {/* Arrow */}
+      <span className="text-gray-500 text-xs">→</span>
+
+      {/* Corrected */}
+      <span className="text-green-400 font-bold text-sm">
+        {correction.corrected}
+      </span>
+
+      {/* Practice Icon */}
+      <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-2 group-hover:bg-violet-500 transition-colors">
+        <Play className="w-3 h-3" />
+      </div>
+    </button>
+  );
+};
+
 export default function App() {
   const [apiKey, setApiKey] = useState<string>(() => {
     return localStorage.getItem('gemini_api_key') || process.env.API_KEY || "";
@@ -523,9 +565,11 @@ export default function App() {
           const matches = text.match(jsonPattern);
 
           if (matches) {
+            console.log("Found JSON matches:", matches);
             matches.forEach(jsonStr => {
               try {
                 const correctionData = JSON.parse(jsonStr);
+                console.log("Parsed correction:", correctionData);
                 if (correctionData.original && correctionData.correction && correctionData.explanation) {
                   const newCorrection: Correction = {
                     original: correctionData.original,
@@ -542,7 +586,7 @@ export default function App() {
                   displayText = displayText.replace(jsonStr, '').trim();
                 }
               } catch (e) {
-                // Invalid JSON, ignore
+                console.error("JSON Parse Error:", e);
               }
             });
           }
@@ -898,42 +942,14 @@ export default function App() {
       <audio ref={playbackAudioRef} hidden playsInline />
 
       {/* Correction Pills - Show last 3 corrections */}
-      {!isPracticeMode && corrections.slice(-3).map((correction, idx) => {
-        const age = Date.now() - correction.timestamp;
-        const isVisible = age < 8000; // Auto-hide after 8 seconds
-
-        if (!isVisible) return null;
-
-        return (
-          <button
-            key={correction.timestamp}
-            onClick={() => enterPracticeMode(correction)}
-            className="fixed bottom-24 right-6 pointer-events-auto bg-black/70 backdrop-blur-xl border border-violet-500/30 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:scale-105 transition-all group animate-slide-in"
-            style={{
-              bottom: `${96 + idx * 80}px`,
-              animation: 'slideInRight 0.3s ease-out'
-            }}
-          >
-            {/* Original (strikethrough) */}
-            <span className="text-red-300 line-through text-sm opacity-70 font-medium">
-              {correction.original}
-            </span>
-
-            {/* Arrow */}
-            <span className="text-gray-500 text-xs">→</span>
-
-            {/* Corrected */}
-            <span className="text-green-400 font-bold text-sm">
-              {correction.corrected}
-            </span>
-
-            {/* Practice Icon */}
-            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-2 group-hover:bg-violet-500 transition-colors">
-              <Play className="w-3 h-3" />
-            </div>
-          </button>
-        );
-      })}
+      {!isPracticeMode && corrections.slice(-3).map((correction, idx) => (
+        <CorrectionPill
+          key={`${correction.timestamp}-${idx}`}
+          correction={correction}
+          index={idx}
+          onOpen={() => enterPracticeMode(correction)}
+        />
+      ))}
 
       {/* Practice Mode Overlay */}
       {isPracticeMode && currentPractice && (
