@@ -17,6 +17,7 @@ export interface Message {
   timestamp: number;
   // Indicates if the message is final or currently being streamed
   isFinal?: boolean;
+  correction?: Correction;
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

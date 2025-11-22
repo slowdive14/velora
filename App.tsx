@@ -587,6 +587,9 @@ export default function App() {
                 correctionsRef.current = [...correctionsRef.current, newCorrection];
                 setCorrections(prev => [...prev, newCorrection]);
 
+                // Auto-trigger Practice Mode (User Request: "Output directly on screen")
+                enterPracticeMode(newCorrection);
+
                 // Remove JSON from the buffer so it doesn't get parsed again
                 // AND remove it from the display text
                 aiTranscriptBufferRef.current = aiTranscriptBufferRef.current.replace(jsonStr, '').trim();
@@ -963,14 +966,8 @@ export default function App() {
       <audio ref={playbackAudioRef} hidden playsInline />
 
       {/* Correction Pills - Show last 3 corrections */}
-      {!isPracticeMode && corrections.slice(-3).map((correction, idx) => (
-        <CorrectionPill
-          key={`${correction.timestamp}-${idx}`}
-          correction={correction}
-          index={idx}
-          onOpen={() => enterPracticeMode(correction)}
-        />
-      ))}
+      {/* Correction Pills - REMOVED (Auto-open implemented) */}
+
 
       {/* Practice Mode Overlay */}
       {isPracticeMode && currentPractice && (
