@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key } from 'lucide-react';
+import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key, Smartphone } from 'lucide-react';
 import { LiveService } from './services/liveService';
 import { Message, ConnectionStatus } from './types';
 import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
@@ -846,6 +846,18 @@ export default function App() {
 
       {/* Hidden Audio Element for Mobile Routing */}
       <audio ref={playbackAudioRef} hidden playsInline />
+
+      {/* Portrait Mode Warning Overlay */}
+      <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center md:hidden portrait:flex hidden">
+        <div className="w-20 h-20 rounded-full bg-violet-500/20 flex items-center justify-center mb-6 animate-pulse">
+          <Smartphone className="w-10 h-10 text-violet-400 rotate-90" />
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-2">Rotate Your Device</h2>
+        <p className="text-gray-400">
+          Velora is designed for landscape mode. <br />
+          Please rotate your phone for the best experience.
+        </p>
+      </div>
 
       {!hasApiKey && showApiKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
