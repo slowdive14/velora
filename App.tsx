@@ -510,7 +510,11 @@ export default function App() {
         playbackDestinationRef.current = ctx.createMediaStreamDestination();
         if (playbackAudioRef.current) {
             playbackAudioRef.current.srcObject = playbackDestinationRef.current.stream;
-            playbackAudioRef.current.play().catch(e => console.error("Playback failed", e));
+            playbackAudioRef.current.volume = 1.0; // Ensure full volume
+            console.log("🔊 Audio routing initialized for Bluetooth/Headset");
+            playbackAudioRef.current.play()
+                .then(() => console.log("✅ Audio playback started successfully"))
+                .catch(e => console.error("❌ Playback failed", e));
         }
 
         nextStartTimeRef.current = 0;
@@ -574,6 +578,20 @@ export default function App() {
 
                         if (textToCommit) {
                             committedUserTranscriptRef.current += (committedUserTranscriptRef.current ? " " : "") + textToCommit;
+
+                            // Limit text length to ~150 characters (2-3 lines on mobile)
+                            const maxChars = 150;
+                            if (committedUserTranscriptRef.current.length > maxChars) {
+                                // Trim from start, keeping the most recent text
+                                const words = committedUserTranscriptRef.current.split(' ');
+                                let trimmed = committedUserTranscriptRef.current;
+                                while (trimmed.length > maxChars && words.length > 0) {
+                                    words.shift();
+                                    trimmed = words.join(' ');
+                                }
+                                committedUserTranscriptRef.current = trimmed;
+                            }
+
                             currentSubtitleRef.current = committedUserTranscriptRef.current;
 
                             // Add to history
@@ -592,6 +610,20 @@ export default function App() {
                     // AI Transcript Logic:
                     // AI streams delta tokens. Just append.
                     aiTranscriptBufferRef.current += text;
+
+                    // Limit text length to ~150 characters (2-3 lines on mobile)
+                    const maxChars = 150;
+                    if (aiTranscriptBufferRef.current.length > maxChars) {
+                        // Trim from start, keeping the most recent text
+                        const words = aiTranscriptBufferRef.current.split(' ');
+                        let trimmed = aiTranscriptBufferRef.current;
+                        while (trimmed.length > maxChars && words.length > 0) {
+                            words.shift();
+                            trimmed = words.join(' ');
+                        }
+                        aiTranscriptBufferRef.current = trimmed;
+                    }
+
                     currentSubtitleRef.current = aiTranscriptBufferRef.current;
                 }
 
@@ -962,7 +994,7 @@ export default function App() {
             </div>
 
             {/* Hidden Audio Element for Mobile Routing */}
-            <audio ref={playbackAudioRef} hidden playsInline />
+            <audio ref={playbackAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
             {/* Correction Pills - Show last 3 corrections */}
             {/* Correction Pills - REMOVED (Auto-open implemented) */}
