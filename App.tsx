@@ -106,8 +106,6 @@ export default function App() {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const aiAudioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-    const playbackDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-    const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
     const nextStartTimeRef = useRef<number>(0);
     const renderLoopRef = useRef<number | null>(null);
 
@@ -505,17 +503,9 @@ export default function App() {
         audioContextRef.current = ctx;
         aiAudioDestinationRef.current = ctx.createMediaStreamDestination();
 
-        // Create a destination for playback (speakers/earphones)
-        // We route this to an HTML <audio> element to ensure mobile browsers respect system audio routing (Bluetooth/Headset)
-        playbackDestinationRef.current = ctx.createMediaStreamDestination();
-        if (playbackAudioRef.current) {
-            playbackAudioRef.current.srcObject = playbackDestinationRef.current.stream;
-            playbackAudioRef.current.volume = 1.0; // Ensure full volume
-            console.log("🔊 Audio routing initialized for Bluetooth/Headset");
-            playbackAudioRef.current.play()
-                .then(() => console.log("✅ Audio playback started successfully"))
-                .catch(e => console.error("❌ Playback failed", e));
-        }
+        // CRITICAL: For proper Bluetooth/headset routing on mobile, connect directly to ctx.destination
+        // The system automatically routes ctx.destination to the active audio output device (speaker/Bluetooth/headset)
+        console.log("🔊 Audio routing: Using AudioContext.destination for system-level Bluetooth support");
 
         nextStartTimeRef.current = 0;
 
@@ -528,12 +518,11 @@ export default function App() {
                 const source = audioContextRef.current.createBufferSource();
                 source.buffer = buffer;
 
-                // Connect to Playback Destination (which goes to <audio> element)
-                if (playbackDestinationRef.current) {
-                    source.connect(playbackDestinationRef.current);
-                }
+                // CRITICAL: Connect directly to AudioContext.destination for proper system audio routing
+                // This ensures Bluetooth/headset routing works correctly on mobile
+                source.connect(audioContextRef.current.destination);
 
-                // Connect to Recording Stream
+                // Also connect to Recording Stream (for video recording)
                 if (aiAudioDestinationRef.current) {
                     source.connect(aiAudioDestinationRef.current);
                 }
@@ -992,9 +981,6 @@ export default function App() {
                     </>
                 )}
             </div>
-
-            {/* Hidden Audio Element for Mobile Routing */}
-            <audio ref={playbackAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
             {/* Correction Pills - Show last 3 corrections */}
             {/* Correction Pills - REMOVED (Auto-open implemented) */}
