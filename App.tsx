@@ -79,6 +79,11 @@ const CorrectionPill: React.FC<{ correction: Correction; index: number; onOpen: 
 };
 
 export default function App() {
+    // Detect mobile device
+    const [isMobile] = useState(() => {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    });
+
     const [apiKey, setApiKey] = useState<string>(() => {
         return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || "";
     });
@@ -739,8 +744,10 @@ export default function App() {
                 correctionsRef.current = [...correctionsRef.current, correction];
                 setCorrections(prev => [...prev, correction]);
 
-                // Auto-trigger Practice Mode
-                enterPracticeMode(correction);
+                // Auto-trigger Practice Mode (desktop only to avoid interrupting mobile conversation flow)
+                if (!isMobile) {
+                    enterPracticeMode(correction);
+                }
             },
             onClose: () => {
                 setStatus('disconnected');
@@ -757,9 +764,10 @@ export default function App() {
         const source = ctx.createMediaStreamSource(streamRef.current);
 
         // High-Pass Filter to remove low-frequency rumble/handling noise (common on mobile)
+        // CRITICAL: Use 50Hz instead of 100Hz to preserve male voice frequencies (85-180Hz)
         const highPassFilter = ctx.createBiquadFilter();
         highPassFilter.type = 'highpass';
-        highPassFilter.frequency.value = 100; // Cut off below 100Hz
+        highPassFilter.frequency.value = 50; // Cut off below 50Hz (was 100Hz - too aggressive)
 
         const worklet = new AudioWorkletNode(ctx, 'pcm-processor');
 
