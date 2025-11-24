@@ -595,19 +595,15 @@ export default function App() {
                         let combined = committedUserTranscriptRef.current ? committedUserTranscriptRef.current + " " : "";
                         combined += currentStream;
 
-                        // CRITICAL: Limit the combined streaming text to prevent overflow
+                        // Display last ~100 chars for streaming (don't modify the refs)
                         const maxChars = 100;
+                        let displayText = combined;
                         if (combined.length > maxChars) {
-                            const words = combined.split(' ');
-                            let trimmed = combined;
-                            while (trimmed.length > maxChars && words.length > 0) {
-                                words.shift();
-                                trimmed = words.join(' ');
-                            }
-                            combined = trimmed;
+                            // Show only the last portion for display
+                            displayText = "..." + combined.slice(-maxChars);
                         }
 
-                        currentSubtitleRef.current = combined;
+                        currentSubtitleRef.current = displayText;
                     }
                 } else {
                     // AI Transcript Logic:
