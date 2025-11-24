@@ -29,3 +29,8 @@ export interface Correction {
   timestamp: number;
   aiContext?: string; // The AI's response text surrounding this correction
 }
+
+export interface TranscriptEntry {
+  role: 'user' | 'ai';
+  text: string;
+}

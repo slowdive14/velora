@@ -35,6 +35,7 @@ export class LiveService {
              - When the user makes a grammar, vocabulary, pronunciation mistake, OR uses **awkward/unnatural phrasing** (even if grammatically correct), you MUST:
                a) **Verbally**: Respond naturally, using the *correct* phrasing in your response (Implicit Recasting). Do NOT explicitly say "You made a mistake".
                b) **Function Call**: Call the 'reportCorrection' tool immediately.
+               c) **Silence**: Do NOT verbally acknowledge the tool call (e.g., do not say "Correction logged"). Just continue the conversation naturally or ask your question.
 
           5. **Tool Use (Strictly Follow)**:
              If you detect ANY mistake or unnatural phrasing, you MUST call the 'reportCorrection' tool with:
@@ -164,7 +165,7 @@ export class LiveService {
                 {
                   id: fc.id,
                   name: fc.name,
-                  response: { result: "Correction logged successfully" }
+                  response: { result: "OK" }
                 }
               ]
             });
@@ -204,6 +205,21 @@ export class LiveService {
       });
     } catch (e) {
       // Fail silently
+    }
+  }
+
+  async sendTextMessage(text: string) {
+    if (!this.session || !this.isConnected) {
+      console.warn("Cannot send text message: Session not connected");
+      return;
+    }
+    console.log("Sending text message:", text);
+    try {
+      await this.session.sendRealtimeInput({
+        text: text
+      });
+    } catch (e) {
+      console.error("Error sending text message", e);
     }
   }
 
