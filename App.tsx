@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key, Smartphone } from 'lucide-react';
+import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key } from 'lucide-react';
 import { LiveService } from './services/liveService';
 import { Message, ConnectionStatus, Correction } from './types';
 import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
@@ -1208,18 +1208,6 @@ export default function App() {
                 </div>
             )}
 
-            {/* Portrait Mode Warning Overlay */}
-            <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center md:hidden portrait:flex hidden">
-                <div className="w-20 h-20 rounded-full bg-violet-500/20 flex items-center justify-center mb-6 animate-pulse">
-                    <Smartphone className="w-10 h-10 text-violet-400 rotate-90" />
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Rotate Your Device</h2>
-                <p className="text-gray-400">
-                    Velora is designed for landscape mode. <br />
-                    Please rotate your phone for the best experience.
-                </p>
-            </div>
-
             {!hasApiKey && showApiKeyModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
                     <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
@@ -1263,6 +1251,35 @@ export default function App() {
                                 className="w-full bg-white text-black font-semibold py-3 rounded-lg hover:bg-gray-200 transition-colors"
                             >
                                 Save & Continue
+                            </button>
+
+                            {import.meta.env.VITE_GEMINI_API_KEY && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        localStorage.removeItem('gemini_api_key');
+                                        const envKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+                                        setApiKey(envKey);
+                                        setHasApiKey(!!envKey);
+                                        setShowApiKeyModal(false);
+                                    }}
+                                    className="w-full bg-neutral-800 text-white font-medium py-3 rounded-lg hover:bg-neutral-700 transition-colors text-sm"
+                                >
+                                    Use Environment API Key
+                                </button>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    localStorage.removeItem('gemini_api_key');
+                                    setApiKey("");
+                                    setHasApiKey(false);
+                                    alert("Saved API key cleared. Please enter a new one or refresh the page to use environment key.");
+                                }}
+                                className="w-full text-red-400 font-medium py-2 rounded-lg hover:bg-red-950/50 transition-colors text-sm"
+                            >
+                                Clear Saved Key
                             </button>
                         </form>
 

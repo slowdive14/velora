@@ -23,6 +23,8 @@ jobs:
         run: npm install --include=dev
 
       - name: Build
+        env:
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
         run: npm run build
 
       - name: Deploy
