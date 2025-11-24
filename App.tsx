@@ -80,7 +80,7 @@ const CorrectionPill: React.FC<{ correction: Correction; index: number; onOpen: 
 
 export default function App() {
     const [apiKey, setApiKey] = useState<string>(() => {
-        return localStorage.getItem('gemini_api_key') || process.env.API_KEY || "";
+        return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || "";
     });
     const [hasApiKey, setHasApiKey] = useState(!!apiKey);
     const [showApiKeyModal, setShowApiKeyModal] = useState(!apiKey);
@@ -109,19 +109,18 @@ export default function App() {
     const nextStartTimeRef = useRef<number>(0);
     const renderLoopRef = useRef<number | null>(null);
 
-    // Subtitle State
-    const currentSubtitleRef = useRef<string>("");
-    // Stores completed user sentences for the current turn so they don't vanish
-    const committedUserTranscriptRef = useRef<string>("");
-    // Stores the latest provisional text to prevent empty final packets from wiping the screen
-    const lastIntermediateUserTextRef = useRef<string>("");
+    // Subtitle State - Show recent 4 turns
+    type SubtitleTurn = { role: 'user' | 'ai'; text: string; id: number };
+    const [recentTurns, setRecentTurns] = useState<SubtitleTurn[]>([]);
+    const recentTurnsRef = useRef<SubtitleTurn[]>([]);
+    const turnIdCounter = useRef<number>(0);
 
     // Transcript History for Download
     const transcriptHistoryRef = useRef<{ role: 'user' | 'ai'; text: string }[]>([]);
+    const userTranscriptBufferRef = useRef<string>("");
     const aiTranscriptBufferRef = useRef<string>("");
 
-    const currentRoleRef = useRef<'user' | 'ai' | null>(null);
-    const subtitleTimeoutRef = useRef<number | null>(null);
+    const lastRoleRef = useRef<'user' | 'ai' | null>(null);
 
 
     const videoIntervalRef = useRef<number | null>(null);
@@ -184,7 +183,11 @@ export default function App() {
         return () => {
             if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
             if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
-            if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
+            // Clean up subtitle state
+            userTranscriptBufferRef.current = "";
+            aiTranscriptBufferRef.current = "";
+            recentTurnsRef.current = [];
+            setRecentTurns([]);
             streamRef.current?.getTracks().forEach(track => track.stop());
             liveServiceRef.current?.disconnect();
             audioContextRef.current?.close();
@@ -223,11 +226,19 @@ export default function App() {
     const enterPracticeMode = (correction: Correction) => {
         setIsPracticeMode(true);
         setCurrentPractice(correction);
+
+        // NOTE: We don't suspend audioContext here because it would stop the microphone AudioWorklet too!
+        // Instead, we check isPracticeModeRef in onAudioData to skip playing AI audio during practice.
     };
 
     const exitPracticeMode = () => {
         setIsPracticeMode(false);
         setCurrentPractice(null);
+
+        // CRITICAL: Reset audio schedule to skip any buffered audio from before practice mode
+        if (audioContextRef.current) {
+            nextStartTimeRef.current = audioContextRef.current.currentTime;
+        }
     };
 
     // Generate contextual re-prompt to continue conversation
@@ -351,22 +362,32 @@ export default function App() {
         ctx.restore();
     };
 
-    const drawSubtitle = (ctx: CanvasRenderingContext2D, text: string, width: number, height: number) => {
+    const drawSubtitle = (
+        ctx: CanvasRenderingContext2D,
+        text: string,
+        width: number,
+        height: number,
+        role: 'user' | 'ai',
+        position: 'top-left' | 'middle-left' | 'middle-right' | 'bottom-right'
+    ) => {
         if (!text || text.trim() === "") return;
 
         // Config
-        const fontSize = 40;
-        const lineHeight = 56;
-        const maxTextWidth = width * 0.8; // Wider text area
+        const fontSize = 18; // Slightly smaller for more content
+        const lineHeight = 28;
+        const maxTextWidth = width * 0.42; // Wider boxes for more content (42% each side)
+        const padding = 16;
+        const labelPadding = 10;
+        const minBoxWidth = 150;
 
-        ctx.font = `500 ${fontSize}px Inter, sans-serif`; // Clean, modern sans-serif
-        ctx.textAlign = 'center';
+        ctx.font = `500 ${fontSize}px Inter, sans-serif`;
+        ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
 
         // Word wrap logic
         const words = text.trim().split(' ');
         const lines = [];
-        let currentLine = words[0];
+        let currentLine = words[0] || "";
 
         for (let i = 1; i < words.length; i++) {
             const word = words[i];
@@ -378,29 +399,75 @@ export default function App() {
                 currentLine = word;
             }
         }
-        lines.push(currentLine);
+        if (currentLine) lines.push(currentLine);
 
-        // Limit to last 3 lines (User Request: "current question and front/back only")
-        const maxLines = 3;
-        const visibleLines = lines.slice(-maxLines);
+        // Limit to 5 lines per box to show more content
+        const visibleLines = lines.slice(0, 5);
 
-        // Position: Centered vertically (or slightly lower for subtitles)
-        const totalHeight = visibleLines.length * lineHeight;
-        const startY = (height - totalHeight) / 2;
+        // Calculate dimensions
+        const totalHeight = visibleLines.length * lineHeight + padding * 2 + labelPadding;
+        const maxLineWidth = Math.max(...visibleLines.map(line => ctx.measureText(line).width));
+        const boxWidth = Math.max(minBoxWidth, Math.min(maxLineWidth + padding * 2, maxTextWidth + padding * 2));
 
-        // Draw Text with subtle shadow
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 10;
+        // Position calculation based on position parameter
+        let startX: number;
+        let startY: number;
+        const margin = 40;
+
+        switch (position) {
+            case 'top-left':
+                startX = margin;
+                startY = margin + 60; // Below header
+                break;
+            case 'middle-left':
+                startX = margin;
+                startY = (height / 2) - (totalHeight / 2);
+                break;
+            case 'middle-right':
+                startX = width - boxWidth - margin;
+                startY = (height / 2) - totalHeight - 40; // Slightly above center
+                break;
+            case 'bottom-right':
+                startX = width - boxWidth - margin;
+                startY = height - totalHeight - margin - 60; // Above bottom controls
+                break;
+        }
+
+        // Draw background box with rounded corners
+        ctx.save();
+        ctx.fillStyle = role === 'user' ? 'rgba(30, 41, 59, 0.95)' : 'rgba(30, 58, 138, 0.95)'; // Darker for user, blue for AI
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 20;
         ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 2;
+        ctx.shadowOffsetY = 4;
+
+        roundRect(ctx, startX, startY, boxWidth, totalHeight, 16);
+        ctx.fill();
+        ctx.restore();
+
+        // Draw label
+        ctx.save();
+        ctx.font = `700 14px Inter, sans-serif`;
+        ctx.fillStyle = role === 'user' ? '#94a3b8' : '#93c5fd'; // Light gray for user, light blue for AI
+        ctx.fillText(role === 'user' ? 'YOU' : 'AI', startX + padding, startY + padding + 6);
+        ctx.restore();
+
+        // Draw text with clip region to prevent overflow
+        ctx.save();
+        ctx.font = `500 ${fontSize}px Inter, sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = 'transparent';
+
+        // Clip to box boundaries to prevent text overflow
+        ctx.beginPath();
+        ctx.rect(startX + padding, startY, boxWidth - padding * 2, totalHeight);
+        ctx.clip();
 
         visibleLines.forEach((line, i) => {
-            ctx.fillText(line, width / 2, startY + (i * lineHeight));
+            ctx.fillText(line, startX + padding, startY + padding + labelPadding + (i * lineHeight) + lineHeight / 2);
         });
 
-        // Reset shadow
-        ctx.shadowColor = 'transparent';
+        ctx.restore();
     };
 
     const startRenderLoop = () => {
@@ -442,10 +509,29 @@ export default function App() {
                             drawAudioWave(ctx, canvas.width, canvas.height, time);
                         }
                     }
-                    // 2. Draw Subtitle Overlay
-                    if (currentSubtitleRef.current) {
-                        drawSubtitle(ctx, currentSubtitleRef.current, canvas.width, canvas.height);
-                    }
+                    // 2. Draw Subtitle Overlay - Show recent 4 turns
+                    // CRITICAL: Use ref instead of state to avoid closure issues in requestAnimationFrame
+                    const currentTurns = recentTurnsRef.current;
+
+                    currentTurns.forEach((turn, index) => {
+                        // Position calculation:
+                        // User: alternates between top-left and middle-left
+                        // AI: alternates between middle-right and bottom-right
+
+                        let position: 'top-left' | 'middle-left' | 'middle-right' | 'bottom-right';
+
+                        if (turn.role === 'user') {
+                            // Count how many user turns before this one
+                            const userIndex = currentTurns.slice(0, index + 1).filter(t => t.role === 'user').length - 1;
+                            position = userIndex % 2 === 0 ? 'top-left' : 'middle-left';
+                        } else {
+                            // Count how many AI turns before this one
+                            const aiIndex = currentTurns.slice(0, index + 1).filter(t => t.role === 'ai').length - 1;
+                            position = aiIndex % 2 === 0 ? 'middle-right' : 'bottom-right';
+                        }
+
+                        drawSubtitle(ctx, turn.text, canvas.width, canvas.height, turn.role, position);
+                    });
                 }
             }
             renderLoopRef.current = requestAnimationFrame(loop);
@@ -485,12 +571,13 @@ export default function App() {
         }
 
         setStatus('connecting');
-        currentSubtitleRef.current = "";
-        committedUserTranscriptRef.current = "";
-        lastIntermediateUserTextRef.current = "";
-        currentRoleRef.current = null;
         transcriptHistoryRef.current = []; // Reset history
+        userTranscriptBufferRef.current = "";
         aiTranscriptBufferRef.current = "";
+        lastRoleRef.current = null;
+        recentTurnsRef.current = [];
+        setRecentTurns([]);
+        turnIdCounter.current = 0;
 
         // Ensure we close any existing context
         if (audioContextRef.current) {
@@ -513,8 +600,16 @@ export default function App() {
         liveServiceRef.current = new LiveService({
             apiKey: apiKey,
             onAudioData: (buffer) => {
-                // Play AI Audio
+                // Play AI Audio (skip during practice mode to avoid interference)
                 if (!audioContextRef.current) return;
+
+                // CRITICAL: Skip playing AI audio during practice mode
+                // This allows the microphone to keep working while preventing audio playback
+                if (isPracticeModeRef.current) {
+                    console.log('[PRACTICE MODE] Skipping AI audio playback');
+                    return;
+                }
+
                 const source = audioContextRef.current.createBufferSource();
                 source.buffer = buffer;
 
@@ -533,126 +628,111 @@ export default function App() {
                 nextStartTimeRef.current = start + buffer.duration;
             },
             onTranscript: (text, isUser, isFinal) => {
-                // Clear previous timeout to prevent clearing text while typing
-                if (subtitleTimeoutRef.current) {
-                    clearTimeout(subtitleTimeoutRef.current);
-                    subtitleTimeoutRef.current = null;
+                const currentRole = isUser ? 'user' : 'ai';
+
+                // CRITICAL: Skip AI transcripts during practice mode to prevent display issues
+                if (isPracticeModeRef.current && !isUser) {
+                    console.log('[PRACTICE MODE] Skipping AI transcript:', text);
+                    return;
                 }
 
-                const role = isUser ? 'user' : 'ai';
+                // CRITICAL: Detect role change - finalize previous turn
+                if (lastRoleRef.current && lastRoleRef.current !== currentRole) {
+                    // Role changed! Finalize the previous role's turn
+                    if (lastRoleRef.current === 'user') {
+                        // User turn ended, AI started speaking
+                        if (userTranscriptBufferRef.current.trim()) {
+                            transcriptHistoryRef.current.push({ role: 'user', text: userTranscriptBufferRef.current });
 
-                // If role changed, reset text and history
-                if (currentRoleRef.current !== role) {
-                    currentSubtitleRef.current = "";
-                    committedUserTranscriptRef.current = "";
-                    lastIntermediateUserTextRef.current = "";
-                    currentRoleRef.current = role;
-                }
+                            // Remove streaming turn before adding finalized turn
+                            const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+                            const newTurns = [...completedTurns, {
+                                role: 'user' as const,
+                                text: userTranscriptBufferRef.current,
+                                id: turnIdCounter.current++
+                            }].slice(-4);
+                            recentTurnsRef.current = newTurns;
+                            setRecentTurns(newTurns);
 
-                if (isUser) {
-                    // User Transcript Logic:
-                    // The API provides the current turn transcript. 
-                    // CAUTION: The API often sends an EMPTY packet with isFinal=true when speech pauses.
-                    // We must use 'lastIntermediateUserTextRef' to survive this empty packet.
-
-                    if (text && text.trim() !== "") {
-                        // We have actual text, save it as the latest valid intermediate
-                        lastIntermediateUserTextRef.current = text;
-                    }
-
-                    if (isFinal) {
-                        // Turn finished. Commit what we have.
-                        // Fallback to lastIntermediate if the final packet is empty.
-                        const textToCommit = (text && text.trim() !== "") ? text : lastIntermediateUserTextRef.current;
-
-                        if (textToCommit) {
-                            committedUserTranscriptRef.current += (committedUserTranscriptRef.current ? " " : "") + textToCommit;
-
-                            // Limit text length to ~100 characters (2 lines on mobile)
-                            const maxChars = 100;
-                            if (committedUserTranscriptRef.current.length > maxChars) {
-                                // Trim from start, keeping the most recent text
-                                const words = committedUserTranscriptRef.current.split(' ');
-                                let trimmed = committedUserTranscriptRef.current;
-                                while (trimmed.length > maxChars && words.length > 0) {
-                                    words.shift();
-                                    trimmed = words.join(' ');
-                                }
-                                committedUserTranscriptRef.current = trimmed;
-                            }
-
-                            currentSubtitleRef.current = committedUserTranscriptRef.current;
-
-                            // Add to history
-                            transcriptHistoryRef.current.push({ role: 'user', text: textToCommit });
+                            userTranscriptBufferRef.current = ""; // Clear buffer
                         }
-                        // Reset intermediate for the next turn
-                        lastIntermediateUserTextRef.current = "";
                     } else {
-                        // Streaming: Show committed + current provisional
-                        // Use text if available, otherwise show what we last saw (prevents flicker)
-                        const currentStream = (text && text.trim() !== "") ? text : lastIntermediateUserTextRef.current;
-                        let combined = committedUserTranscriptRef.current ? committedUserTranscriptRef.current + " " : "";
-                        combined += currentStream;
+                        // AI turn ended, User started speaking
+                        if (aiTranscriptBufferRef.current.trim()) {
+                            transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
 
-                        // Display last ~100 chars for streaming (don't modify the refs)
-                        const maxChars = 100;
-                        let displayText = combined;
-                        if (combined.length > maxChars) {
-                            // Show only the last portion for display
-                            displayText = "..." + combined.slice(-maxChars);
+                            // Remove streaming turn before adding finalized turn
+                            const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+                            const newTurns = [...completedTurns, {
+                                role: 'ai' as const,
+                                text: aiTranscriptBufferRef.current,
+                                id: turnIdCounter.current++
+                            }].slice(-4);
+                            recentTurnsRef.current = newTurns;
+                            setRecentTurns(newTurns);
+
+                            aiTranscriptBufferRef.current = ""; // Clear buffer
                         }
-
-                        currentSubtitleRef.current = displayText;
                     }
-                } else {
-                    // AI Transcript Logic:
-                    // AI streams delta tokens. Just append.
-                    aiTranscriptBufferRef.current += text;
-
-                    // Limit text length to ~100 characters (2 lines on mobile)
-                    const maxChars = 100;
-                    if (aiTranscriptBufferRef.current.length > maxChars) {
-                        // Trim from start, keeping the most recent text
-                        const words = aiTranscriptBufferRef.current.split(' ');
-                        let trimmed = aiTranscriptBufferRef.current;
-                        while (trimmed.length > maxChars && words.length > 0) {
-                            words.shift();
-                            trimmed = words.join(' ');
-                        }
-                        aiTranscriptBufferRef.current = trimmed;
-                    }
-
-                    currentSubtitleRef.current = aiTranscriptBufferRef.current;
                 }
 
-                if (isFinal && !isUser) {
-                    // Only auto-clear AI text after a delay
-                    subtitleTimeoutRef.current = window.setTimeout(() => {
-                        if (currentRoleRef.current === role && role === 'ai') {
-                            currentSubtitleRef.current = "";
-                        }
-                    }, 5000);
+                // Update last role
+                lastRoleRef.current = currentRole;
 
-                    // Add to history
-                    if (aiTranscriptBufferRef.current.trim()) {
-                        transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
-                        aiTranscriptBufferRef.current = "";
+                // Accumulate text in buffer (with sanitization)
+                if (text && text.trim() !== "") {
+                    // CRITICAL: Filter out control characters and HTML-like tags
+                    // DO NOT trim() individual chunks - it removes spaces between words!
+                    const sanitizedText = text
+                        .replace(/<ctrl\d+>/g, '') // Remove <ctrl46> etc
+                        .replace(/[\x00-\x1F\x7F-\x9F]/g, ''); // Remove control characters
+
+                    if (sanitizedText) {
+                        if (isUser) {
+                            userTranscriptBufferRef.current += sanitizedText;
+                        } else {
+                            aiTranscriptBufferRef.current += sanitizedText;
+                        }
+
+                        // Update streaming turn in display
+                        const currentStreamingTurn: SubtitleTurn = {
+                            role: currentRole,
+                            text: isUser ? userTranscriptBufferRef.current : aiTranscriptBufferRef.current,
+                            id: -1 // Special ID for streaming
+                        };
+
+                        // Remove existing streaming turn before adding new one
+                        const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+                        const newTurns = [...completedTurns, currentStreamingTurn].slice(-4);
+                        recentTurnsRef.current = newTurns;
+                        setRecentTurns(newTurns);
                     }
                 }
             },
             onCorrection: (correction: Correction) => {
-                console.log("Tool Correction Received:", correction);
-
-                // Add context from recent AI speech if available
-                // Extract last 2 sentences for better context (User Request: "AI answer should change topic")
-                if (!correction.aiContext && aiTranscriptBufferRef.current) {
+                // CRITICAL: Tool call means AI turn is complete. Finalize it now!
+                if (aiTranscriptBufferRef.current.trim()) {
+                    // Add context from AI speech
                     const text = aiTranscriptBufferRef.current.trim();
-                    // Split by sentence endings (. ? !)
                     const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-                    // Take last 2 sentences
                     const recentContext = sentences.slice(-2).join(' ').trim();
                     correction.aiContext = recentContext || text;
+
+                    // Finalize AI turn
+                    transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+
+                    // Remove streaming turn before adding finalized turn
+                    const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+                    const newTurns = [...completedTurns, {
+                        role: 'ai' as const,
+                        text: aiTranscriptBufferRef.current,
+                        id: turnIdCounter.current++
+                    }].slice(-4);
+                    recentTurnsRef.current = newTurns;
+                    setRecentTurns(newTurns);
+
+                    aiTranscriptBufferRef.current = ""; // Clear buffer
+                    lastRoleRef.current = null; // Reset so next AI text starts fresh turn
                 }
 
                 // Add to corrections list
@@ -807,9 +887,15 @@ export default function App() {
         liveServiceRef.current?.disconnect();
         setStatus('disconnected');
 
-        currentSubtitleRef.current = "";
+        // Clean up subtitle state
+        userTranscriptBufferRef.current = "";
+        aiTranscriptBufferRef.current = "";
+        lastRoleRef.current = null;
+        recentTurnsRef.current = [];
+        setRecentTurns([]);
+        turnIdCounter.current = 0;
+
         if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
-        if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
 
         // Cleanup AudioContext to release hardware
         if (audioContextRef.current) {
@@ -911,15 +997,21 @@ export default function App() {
                 {!isRecording && !recordedUrl && status !== 'connected' && status !== 'connecting' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm p-6">
 
-                        <p className="text-gray-300 text-center max-w-md mb-6 text-sm">
-                            Paste a transcript or article below to practice specific content, or leave empty for a casual chat.
-                        </p>
+                        <div className="text-center max-w-lg mb-6">
+                            <p className="text-gray-300 text-base mb-3">
+                                🎯 <strong>학습 자료 모드</strong> 또는 <strong>자유 대화</strong> 중 선택하세요
+                            </p>
+                            <p className="text-gray-400 text-sm">
+                                <strong>학습 자료 모드</strong>: 자료를 안 읽어도 OK! AI가 학습을 도와주고, 그 내용을 영어로 말하게 도와드립니다.<br />
+                                <strong>자유 대화</strong>: 비워두면 일상적인 영어 대화를 나눕니다.
+                            </p>
+                        </div>
 
                         <textarea
                             value={studyMaterial}
                             onChange={(e) => setStudyMaterial(e.target.value)}
-                            placeholder="Paste your study material here (optional)..."
-                            className="w-full max-w-lg h-32 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-6 resize-none text-sm"
+                            placeholder="여기에 학습 자료를 붙여넣으세요 (선택사항)&#10;예: 뉴스 기사, 논문 요약, 읽고 있는 책 내용 등..."
+                            className="w-full max-w-lg h-40 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 mb-6 resize-none text-sm"
                         />
 
                         <button
@@ -928,9 +1020,9 @@ export default function App() {
                         >
                             <div className="absolute inset-0 rounded-full bg-white/20 group-hover:opacity-100 opacity-0 transition-opacity duration-300" />
                             <Play className="w-5 h-5 fill-white" />
-                            {studyMaterial.trim() ? "Start Tutor Session" : "Start Podcast Chat"}
+                            {studyMaterial.trim() ? "학습 자료로 시작하기" : "자유 대화 시작하기"}
                         </button>
-                        <p className="mt-6 text-xs text-gray-500 font-mono">POWERED BY GEMINI</p>
+                        <p className="mt-6 text-xs text-gray-500 font-mono">POWERED BY GEMINI 2.5 FLASH</p>
                     </div>
                 )}
             </main>
