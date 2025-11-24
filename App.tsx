@@ -568,8 +568,8 @@ export default function App() {
                         if (textToCommit) {
                             committedUserTranscriptRef.current += (committedUserTranscriptRef.current ? " " : "") + textToCommit;
 
-                            // Limit text length to ~150 characters (2-3 lines on mobile)
-                            const maxChars = 150;
+                            // Limit text length to ~100 characters (2 lines on mobile)
+                            const maxChars = 100;
                             if (committedUserTranscriptRef.current.length > maxChars) {
                                 // Trim from start, keeping the most recent text
                                 const words = committedUserTranscriptRef.current.split(' ');
@@ -592,16 +592,30 @@ export default function App() {
                         // Streaming: Show committed + current provisional
                         // Use text if available, otherwise show what we last saw (prevents flicker)
                         const currentStream = (text && text.trim() !== "") ? text : lastIntermediateUserTextRef.current;
-                        const prefix = committedUserTranscriptRef.current ? committedUserTranscriptRef.current + " " : "";
-                        currentSubtitleRef.current = prefix + currentStream;
+                        let combined = committedUserTranscriptRef.current ? committedUserTranscriptRef.current + " " : "";
+                        combined += currentStream;
+
+                        // CRITICAL: Limit the combined streaming text to prevent overflow
+                        const maxChars = 100;
+                        if (combined.length > maxChars) {
+                            const words = combined.split(' ');
+                            let trimmed = combined;
+                            while (trimmed.length > maxChars && words.length > 0) {
+                                words.shift();
+                                trimmed = words.join(' ');
+                            }
+                            combined = trimmed;
+                        }
+
+                        currentSubtitleRef.current = combined;
                     }
                 } else {
                     // AI Transcript Logic:
                     // AI streams delta tokens. Just append.
                     aiTranscriptBufferRef.current += text;
 
-                    // Limit text length to ~150 characters (2-3 lines on mobile)
-                    const maxChars = 150;
+                    // Limit text length to ~100 characters (2 lines on mobile)
+                    const maxChars = 100;
                     if (aiTranscriptBufferRef.current.length > maxChars) {
                         // Trim from start, keeping the most recent text
                         const words = aiTranscriptBufferRef.current.split(' ');
