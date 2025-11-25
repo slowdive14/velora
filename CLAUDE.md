@@ -75,6 +75,16 @@ The app implements a "Shadow Corrector" pattern:
 - User can click to enter practice mode and hear more context
 - Corrections include `aiContext` field populated from the transcript buffer
 
+### Practice Mode & "Ask AI More"
+
+When a user clicks a correction pill, the app enters **Practice Mode**:
+- **State**: `isPracticeMode` becomes true.
+- **Audio Routing**: Microphone input is still sent to Gemini (to keep connection alive), but AI audio output is **blocked** in `onAudioData` to prevent interference.
+- **"Ask AI More" Feature**:
+  - Allows user to request a detailed explanation for the specific correction.
+  - Sends a text prompt: *"Let's continue with [context]. Can you explain more about why [corrected] is better than [original]?..."*
+  - seamlessly transitions back to roleplay after the explanation.
+
 ### Transcript Management
 
 **Real-time Subtitles:**
@@ -109,13 +119,48 @@ The app uses extensive refs to maintain state across async operations:
 - Target: ES2022 with experimental decorators
 - Module resolution: bundler mode (Vite)
 
-## Study Material Mode
+## Conversation Modes
+
+### Free Conversation Mode (Default)
+
+When no study material is provided:
+- AI acts as a warm, engaging conversation partner
+- **Primary goal**: Make the user speak as much as possible
+- Asks follow-up questions to keep conversation flowing
+- Only corrects clear grammar/vocabulary mistakes (not style preferences)
+- Keeps responses short (1-2 sentences) to maximize user speaking time
+- Uses "Shadow Corrector" approach:
+  - Verbally uses correct form naturally (Implicit Recasting)
+  - Silently calls `reportCorrection` tool
+  - Never explicitly says "you made a mistake"
+
+### Study Material Mode
 
 When user provides study material text:
-- System instruction switches to "strict tutor" mode
-- AI asks user to summarize the text
-- Follow-up questions test comprehension
-- More explicit corrections focused on the material content
+- **First**: AI asks if the user has read the material yet
+
+- **If YES (already read)**:
+  - AI asks open-ended questions about the content
+  - Encourages the user to speak as much as possible
+  - Focuses on elaboration and personal connections
+  - Keeps responses short (1-2 sentences) to maximize user speaking time
+
+- **If NO (haven't read yet)**:
+  - AI offers learning options:
+    - "Would you like me to summarize the key points?"
+    - "Should we walk through it section by section?"
+    - "Or would you prefer to read it first?"
+  - **If user wants help learning**:
+    - AI breaks down material into chunks
+    - Explains concepts clearly (2-3 sentences per concept)
+    - After each explanation: "Can you explain this back to me in your own words?"
+    - Encourages paraphrasing and speaking
+  - **If user wants to read first**:
+    - AI waits and lets them know to signal when ready
+
+- **Correction approach**: Only corrects clear grammar/vocabulary mistakes
+- **Goal**: 70% user speaking, 30% AI speaking
+- **Dual purpose**: Learn the material AND practice English speaking
 
 ## Common Issues
 
