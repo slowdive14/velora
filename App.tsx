@@ -945,18 +945,19 @@ export default function App() {
     };
 
     return (
-        <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-4 md:p-8 font-sans">
-            <header className="absolute top-6 left-6 md:left-10 z-20 flex items-center gap-3">
-                <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2 rounded-lg">
+        <div className="h-[100dvh] w-full bg-neutral-950 text-white flex flex-col items-center justify-center overflow-hidden font-sans relative">
+            <header className="absolute top-6 left-6 md:left-10 z-20 flex items-center gap-3 pointer-events-none">
+                <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2 rounded-lg pointer-events-auto">
                     <Video className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                    <h1 className="text-xl font-bold tracking-tight">Velora</h1>
-                    <p className="text-xs text-gray-400">AI-Powered Podcast Host</p>
+                    <h1 className="text-xl font-bold tracking-tight drop-shadow-md">Velora</h1>
+                    <p className="text-xs text-gray-300 drop-shadow-md">AI-Powered Podcast Host</p>
                 </div>
             </header>
 
-            <main className="relative w-full max-w-5xl aspect-video bg-neutral-900 rounded-3xl overflow-hidden shadow-2xl border border-neutral-800">
+            {/* Main Video Container - Full Screen on Mobile */}
+            <main className="relative w-full h-full md:max-w-5xl md:h-auto md:aspect-video bg-neutral-900 md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-neutral-800">
 
                 <video
                     ref={videoRef}
@@ -968,20 +969,20 @@ export default function App() {
 
                 <canvas
                     ref={canvasRef}
-                    className={`w-full h-full object-contain bg-black ${recordedUrl ? 'hidden' : 'block'}`}
+                    className={`w-full h-full object-cover md:object-contain bg-black ${recordedUrl ? 'hidden' : 'block'}`}
                 />
 
                 {recordedUrl && (
                     <video
                         src={recordedUrl}
                         controls
-                        className="w-full h-full object-contain bg-black absolute inset-0"
+                        className="w-full h-full object-contain bg-black absolute inset-0 z-10"
                     />
                 )}
 
                 {!recordedUrl && (
                     <>
-                        <div className="absolute top-6 right-6 flex items-center gap-3">
+                        <div className="absolute top-6 right-6 flex items-center gap-3 z-20">
                             <div className={`px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-2 text-xs font-medium border ${status === 'connected'
                                 ? 'bg-green-500/20 border-green-500/30 text-green-400'
                                 : status === 'connecting'
@@ -1003,7 +1004,7 @@ export default function App() {
                 )}
 
                 {!isRecording && !recordedUrl && status !== 'connected' && status !== 'connecting' && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm p-6 z-30">
 
                         <div className="text-center max-w-lg mb-6">
                             <p className="text-gray-300 text-base mb-3">
@@ -1033,64 +1034,65 @@ export default function App() {
                         <p className="mt-6 text-xs text-gray-500 font-mono">POWERED BY GEMINI 2.5 FLASH</p>
                     </div>
                 )}
-            </main>
 
-            <div className="mt-8 flex items-center justify-center gap-6">
-                {!recordedUrl ? (
-                    <>
-                        <button
-                            onClick={toggleCamera}
-                            className="w-12 h-12 rounded-full bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center transition-colors border border-neutral-700"
-                            title={isCameraOn ? "Turn Camera Off" : "Turn Camera On"}
-                        >
-                            {isCameraOn ? (
-                                <Camera className="w-5 h-5 text-white" />
-                            ) : (
-                                <CameraOff className="w-5 h-5 text-red-400" />
-                            )}
-                        </button>
-
-                        {isRecording ? (
+                {/* Controls Overlay - Positioned at bottom center over the video */}
+                <div className="absolute bottom-8 left-0 right-0 flex items-center justify-center gap-6 z-40 pointer-events-none">
+                    {!recordedUrl ? (
+                        <div className="pointer-events-auto flex items-center gap-6">
                             <button
-                                onClick={stopRecording}
-                                className="flex flex-col items-center gap-2 group"
+                                onClick={toggleCamera}
+                                className="w-12 h-12 rounded-full bg-neutral-900/80 hover:bg-neutral-800 backdrop-blur-md flex items-center justify-center transition-colors border border-white/10"
+                                title={isCameraOn ? "Turn Camera Off" : "Turn Camera On"}
                             >
-                                <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/50 backdrop-blur-md flex items-center justify-center transition-all shadow-[0_0_30px_-5px_rgba(239,68,68,0.4)] group-hover:shadow-[0_0_50px_-5px_rgba(239,68,68,0.6)] group-hover:scale-110">
-                                    <div className="w-6 h-6 bg-red-500 rounded-sm shadow-inner" />
-                                </div>
-                                <span className="text-xs font-medium text-red-400 group-hover:text-red-300 transition-colors tracking-wider">STOP SESSION</span>
+                                {isCameraOn ? (
+                                    <Camera className="w-5 h-5 text-white" />
+                                ) : (
+                                    <CameraOff className="w-5 h-5 text-red-400" />
+                                )}
                             </button>
-                        ) : null}
-                    </>
-                ) : (
-                    <>
-                        <button
-                            onClick={() => {
-                                setRecordedUrl(null);
-                                initializeStream();
-                            }}
-                            className="px-6 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 backdrop-blur-md text-white font-medium transition-all flex items-center gap-2 hover:border-white/20"
-                        >
-                            <Settings2 className="w-4 h-4 text-gray-300" />
-                            New Recording
-                        </button>
-                        <button
-                            onClick={downloadVideo}
-                            className="px-6 py-3 rounded-full bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 backdrop-blur-md text-violet-200 font-medium transition-all flex items-center gap-2 hover:shadow-[0_0_20px_-5px_rgba(139,92,246,0.3)]"
-                        >
-                            <Download className="w-4 h-4" />
-                            Download MP4
-                        </button>
-                        <button
-                            onClick={downloadTranscript}
-                            className="px-6 py-3 rounded-full bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 backdrop-blur-md text-cyan-200 font-medium transition-all flex items-center gap-2 hover:shadow-[0_0_20px_-5px_rgba(8,145,178,0.3)]"
-                        >
-                            <FileText className="w-4 h-4" />
-                            Download Transcript
-                        </button>
-                    </>
-                )}
-            </div>
+
+                            {isRecording ? (
+                                <button
+                                    onClick={stopRecording}
+                                    className="flex flex-col items-center gap-2 group"
+                                >
+                                    <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/50 backdrop-blur-md flex items-center justify-center transition-all shadow-[0_0_30px_-5px_rgba(239,68,68,0.4)] group-hover:shadow-[0_0_50px_-5px_rgba(239,68,68,0.6)] group-hover:scale-110">
+                                        <div className="w-6 h-6 bg-red-500 rounded-sm shadow-inner" />
+                                    </div>
+                                    <span className="text-xs font-medium text-red-400 group-hover:text-red-300 transition-colors tracking-wider drop-shadow-md">STOP</span>
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : (
+                        <div className="pointer-events-auto flex items-center gap-4">
+                            <button
+                                onClick={() => {
+                                    setRecordedUrl(null);
+                                    initializeStream();
+                                }}
+                                className="px-6 py-3 rounded-full bg-black/50 hover:bg-black/70 border border-white/10 backdrop-blur-md text-white font-medium transition-all flex items-center gap-2"
+                            >
+                                <Settings2 className="w-4 h-4 text-gray-300" />
+                                New
+                            </button>
+                            <button
+                                onClick={downloadVideo}
+                                className="px-6 py-3 rounded-full bg-violet-600/80 hover:bg-violet-600/90 border border-violet-500/30 backdrop-blur-md text-violet-200 font-medium transition-all flex items-center gap-2"
+                            >
+                                <Download className="w-4 h-4" />
+                                MP4
+                            </button>
+                            <button
+                                onClick={downloadTranscript}
+                                className="px-6 py-3 rounded-full bg-cyan-600/80 hover:bg-cyan-600/90 border border-cyan-500/30 backdrop-blur-md text-cyan-200 font-medium transition-all flex items-center gap-2"
+                            >
+                                <FileText className="w-4 h-4" />
+                                Text
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </main>
 
             {/* Correction Pills - Show last 3 corrections */}
             {/* Correction Pills - REMOVED (Auto-open implemented) */}
