@@ -44,11 +44,11 @@
 }
 </script>
   <link rel="stylesheet" href="/index.css">
-  <link rel="manifest" href="/manifest.json">
+  <link rel="manifest" href="./manifest.json">
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
+        navigator.serviceWorker.register('./service-worker.js')
           .then(registration => console.log('SW registered: ', registration))
           .catch(registrationError => console.log('SW registration failed: ', registrationError));
       });
