@@ -1,4 +1,4 @@
-import { GoogleGenAI, LiveServerMessage, Modality, Tool } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Tool, Type } from '@google/genai';
 import { base64ToUint8Array, decodeAudioData, float32ToInt16PCM, arrayBufferToBase64 } from '../utils/audioUtils';
 import { Correction } from '../types';
 
@@ -138,11 +138,11 @@ export class LiveService {
               name: "reportCorrection",
               description: "Report a CLEAR grammar, vocabulary, or pronunciation mistake made by the user. Only use when there is an objective error, not for stylistic preferences.",
               parameters: {
-                type: "OBJECT",
+                type: Type.OBJECT,
                 properties: {
-                  original: { type: "STRING", description: "The user's original incorrect phrase" },
-                  corrected: { type: "STRING", description: "The corrected version of the phrase" },
-                  explanation: { type: "STRING", description: "A brief explanation of why this is an error (grammar rule, vocabulary misuse, etc.)" }
+                  original: { type: Type.STRING, description: "The user's original incorrect phrase" },
+                  corrected: { type: Type.STRING, description: "The corrected version of the phrase" },
+                  explanation: { type: Type.STRING, description: "A brief explanation of why this is an error (grammar rule, vocabulary misuse, etc.)" }
                 },
                 required: ["original", "corrected", "explanation"]
               }
@@ -159,6 +159,16 @@ export class LiveService {
           tools: tools,
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+          },
+          generationConfig: {
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+            }
+          },
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              silenceDurationMs: 2000,
+            }
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
