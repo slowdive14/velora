@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Gemini Cast is an AI-powered English fluency practice app that enables users to record video logs while receiving real-time corrections and feedback from Google's Gemini AI. The app acts as a conversational podcast co-host that provides implicit recasting (natural corrections embedded in conversation) and explicit correction tracking.
 
 ## Development Commands
+- PWA support with landscape orientation lock
+- Offline support via Service Worker
+- Custom app icons (192x192, 512x512)
 
 **Setup:**
 ```bash
