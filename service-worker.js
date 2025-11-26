@@ -1,12 +1,12 @@
 // service-worker.js
 const CACHE_NAME = 'velora-cache-v1';
 const urlsToCache = [
-    '/',
-    '/index.html',
-    '/index.css',
-    '/index.tsx',
-    '/App.tsx',
-    '/manifest.json'
+    './',
+    './index.html',
+    './index.css',
+    './index.tsx',
+    './App.tsx',
+    './manifest.json'
 ];
 
 // Install event - cache files
