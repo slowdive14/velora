@@ -904,19 +904,13 @@ export default function App() {
                                 <div className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-green-400 animate-pulse' : status === 'connecting' ? 'bg-yellow-400' : 'bg-gray-400'}`} />
                                 {status === 'connected' ? 'AI HOST ACTIVE' : status === 'connecting' ? 'CONNECTING...' : status === 'error' ? 'ERROR' : 'AI READY'}
                             </div>
-
-                            {isRecording && (
-                                <div className="px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/30 backdrop-blur-md flex items-center gap-2 text-xs font-medium text-red-400 animate-pulse">
-                                    <div className="w-2 h-2 rounded-full bg-red-500" />
-                                    REC {elapsedTime}
-                                </div>
-                            )}
                         </div>
                     </>
                 )}
 
                 {/* HTML Subtitle Overlay - Positioned absolutely within the video container */}
-                <div className="absolute inset-0 pointer-events-none p-6 pt-20 flex flex-col justify-end z-30 pb-32 md:pb-24">
+                {/* Fixed: Top constraint increased to top-32 to strictly avoid status bar overlap */}
+                <div className="absolute top-32 bottom-0 left-0 right-0 pointer-events-none p-6 flex flex-col justify-end z-30 pb-32 md:pb-24">
                     {recentTurns.map((turn) => (
                         <div
                             key={turn.id}
@@ -1104,48 +1098,36 @@ export default function App() {
                                                 return null;
                                             })}
                                         </p>
+                                        <p className="text-violet-400/60 text-sm">
+                                            Improved phrasing and word choice for clarity and flow.
+                                        </p>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* 5. Contextual Feedback (Tip Section) */}
-                            <div className="bg-violet-500/10 border border-violet-500/20 rounded-2xl p-6 flex items-start gap-4">
-                                <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
-                                    <span className="text-violet-300 font-bold text-sm">TIP</span>
+                                {/* Action Buttons */}
+                                <div className="flex gap-4 mt-auto pt-4 border-t border-white/5">
+                                    <button
+                                        onClick={exitPracticeMode}
+                                        className="flex-1 px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        onClick={generateContextualReprompt}
+                                        disabled={status !== 'connected'}
+                                        className="flex-1 px-8 py-4 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 text-violet-200 font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <AlertCircle className="w-4 h-4" />
+                                        Ask AI More
+                                    </button>
+                                    <button
+                                        onClick={exitPracticeMode}
+                                        className="flex-1 px-8 py-4 rounded-xl bg-white text-black font-bold hover:scale-[1.02] transition-all shadow-xl flex items-center justify-center gap-2"
+                                    >
+                                        <Play className="w-4 h-4 fill-current" />
+                                        Practice Speaking
+                                    </button>
                                 </div>
-                                <div className="space-y-1">
-                                    <p className="text-violet-200 text-lg font-medium">
-                                        {currentPractice.explanation}
-                                    </p>
-                                    <p className="text-violet-400/60 text-sm">
-                                        Improved phrasing and word choice for clarity and flow.
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="flex gap-4 mt-auto pt-4 border-t border-white/5">
-                                <button
-                                    onClick={exitPracticeMode}
-                                    className="flex-1 px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
-                                >
-                                    Close
-                                </button>
-                                <button
-                                    onClick={generateContextualReprompt}
-                                    disabled={status !== 'connected'}
-                                    className="flex-1 px-8 py-4 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 text-violet-200 font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <AlertCircle className="w-4 h-4" />
-                                    Ask AI More
-                                </button>
-                                <button
-                                    onClick={exitPracticeMode}
-                                    className="flex-1 px-8 py-4 rounded-xl bg-white text-black font-bold hover:scale-[1.02] transition-all shadow-xl flex items-center justify-center gap-2"
-                                >
-                                    <Play className="w-4 h-4 fill-current" />
-                                    Practice Speaking
-                                </button>
                             </div>
                         </div>
                     </div>
