@@ -595,15 +595,30 @@ export default function App() {
                             aiTranscriptBufferRef.current += sanitizedText;
                         }
 
+                        let textToDisplay = isUser ? userTranscriptBufferRef.current : aiTranscriptBufferRef.current;
+                        let completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+
+                        // Check for merge opportunity (fix for fragmented AI speech)
+                        const lastTurn = completedTurns[completedTurns.length - 1];
+                        if (lastTurn && lastTurn.role === currentRole) {
+                            const bufferStart = textToDisplay.trim().charAt(0);
+                            // If starts with lowercase, it's likely a continuation
+                            if (bufferStart && bufferStart === bufferStart.toLowerCase() && bufferStart !== bufferStart.toUpperCase()) {
+                                // Merge visually
+                                textToDisplay = lastTurn.text + " " + textToDisplay;
+                                // Remove the last finalized turn since we are merging it into the streaming turn
+                                completedTurns = completedTurns.slice(0, -1);
+                            }
+                        }
+
                         // Update streaming turn in display
                         const currentStreamingTurn: SubtitleTurn = {
                             role: currentRole,
-                            text: isUser ? userTranscriptBufferRef.current : aiTranscriptBufferRef.current,
+                            text: textToDisplay,
                             id: -1 // Special ID for streaming
                         };
 
                         // Remove existing streaming turn before adding new one
-                        const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
                         const newTurns = [...completedTurns, currentStreamingTurn].slice(-4);
                         recentTurnsRef.current = newTurns;
                         setRecentTurns(newTurns);
@@ -901,7 +916,7 @@ export default function App() {
                 )}
 
                 {/* HTML Subtitle Overlay - Positioned absolutely within the video container */}
-                <div className="absolute inset-0 pointer-events-none p-6 flex flex-col justify-end z-30 pb-32 md:pb-24">
+                <div className="absolute inset-0 pointer-events-none p-6 pt-20 flex flex-col justify-end z-30 pb-32 md:pb-24">
                     {recentTurns.map((turn) => (
                         <div
                             key={turn.id}
