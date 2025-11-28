@@ -665,6 +665,9 @@ export default function App() {
             },
             onError: () => {
                 setStatus('error');
+            },
+            onReconnecting: () => {
+                setStatus('connecting'); // Show "CONNECTING..." during reconnection
             }
         }, ctx);
 

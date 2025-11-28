@@ -9,6 +9,7 @@ interface LiveServiceConfig {
   onCorrection: (correction: Correction) => void;
   onClose: () => void;
   onError: (error: Error) => void;
+  onReconnecting?: () => void; // New callback for reconnection state
 }
 
 export class LiveService {
@@ -17,6 +18,11 @@ export class LiveService {
   private config: LiveServiceConfig;
   private audioContext: AudioContext;
   private isConnected: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 5;
+  private reconnectTimeout: number | null = null;
+  private isReconnecting: boolean = false;
+  private lastStudyMaterial: string = '';
 
   constructor(config: LiveServiceConfig, audioContext: AudioContext) {
     this.config = config;
@@ -25,6 +31,9 @@ export class LiveService {
   }
 
   async connect(studyMaterial?: string) {
+    // Store study material for reconnection
+    this.lastStudyMaterial = studyMaterial || '';
+
     try {
       let systemInstruction = `You are a warm, engaging, and curious conversation partner helping the user practice English naturally.
 
@@ -172,11 +181,21 @@ export class LiveService {
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          // Enable Context Window Compression for unlimited session duration
+          contextWindowCompression: {
+            slidingWindow: {}
+          },
         },
         callbacks: {
           onopen: () => {
             console.log('✅ Gemini Live Connected - Session ready');
             this.isConnected = true;
+            this.isReconnecting = false;
+            this.reconnectAttempts = 0; // Reset on successful connection
+            if (this.reconnectTimeout) {
+              clearTimeout(this.reconnectTimeout);
+              this.reconnectTimeout = null;
+            }
           },
           onmessage: this.handleMessage.bind(this),
           onclose: (event: any) => {
@@ -185,7 +204,17 @@ export class LiveService {
               console.error('Close reason:', event.reason);
             }
             this.isConnected = false;
-            this.config.onClose();
+
+            // Attempt automatic reconnection if not intentionally disconnected
+            // and we haven't exceeded max attempts
+            if (!this.isReconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
+              this.attemptReconnect();
+            } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+              console.error('❌ Max reconnection attempts reached');
+              this.config.onClose();
+            } else {
+              this.config.onClose();
+            }
           },
           onerror: (err: ErrorEvent) => {
             console.error('❌ Gemini Live Error:', {
@@ -312,8 +341,39 @@ export class LiveService {
     }
   }
 
+  private async attemptReconnect() {
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    // Exponential backoff: 2^n seconds (2s, 4s, 8s, 16s, 32s)
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 32000);
+
+    console.log(`🔄 Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+
+    if (this.config.onReconnecting) {
+      this.config.onReconnecting();
+    }
+
+    this.reconnectTimeout = window.setTimeout(async () => {
+      try {
+        await this.connect(this.lastStudyMaterial);
+        console.log('✅ Reconnection successful');
+      } catch (error) {
+        console.error('❌ Reconnection failed:', error);
+        // onclose will be called again, which will trigger another attempt if under max
+      }
+    }, delay);
+  }
+
   disconnect() {
     this.isConnected = false;
+    this.isReconnecting = false; // Prevent reconnection when intentionally disconnecting
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
     if (this.session) {
       try {
         this.session.close();
