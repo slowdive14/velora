@@ -898,6 +898,15 @@ export default function App() {
                 {!recordedUrl && (
                     <>
                         <div className="absolute top-6 right-6 flex items-center gap-3 z-20">
+                            {/* Recording Timer */}
+                            {isRecording && (
+                                <div className="px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-2 text-xs font-medium border bg-red-500/20 border-red-500/30 text-red-400">
+                                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                    REC {elapsedTime}
+                                </div>
+                            )}
+
+                            {/* AI Status Indicator */}
                             <div className={`px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-2 text-xs font-medium border ${status === 'connected'
                                 ? 'bg-green-500/20 border-green-500/30 text-green-400'
                                 : status === 'connecting'
