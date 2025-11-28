@@ -167,7 +167,7 @@ export class LiveService {
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
-              silenceDurationMs: 2000,
+              silenceDurationMs: 500,
             }
           },
           inputAudioTranscription: {},

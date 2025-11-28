@@ -441,7 +441,10 @@ export default function App() {
 
     const setupAudioContext = async () => {
         // Native 16kHz context prevents resampling artifacts and improves connection stability
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+            latencyHint: 'interactive',
+            sampleRate: 16000,
+        });
         await ctx.resume();
 
         // Load AudioWorklet

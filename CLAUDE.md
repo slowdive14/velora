@@ -179,3 +179,12 @@ When user provides study material text:
 **Camera Not Working:**
 - Video track must remain enabled for `readyState` checks
 - Camera on/off is handled in render loop, not by disabling tracks
+
+## Troubleshooting
+
+### PowerShell Execution Policy Error
+If you encounter `PSSecurityException` or `UnauthorizedAccess` errors when running npm commands:
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+```
+This allows scripts signed by a trusted publisher to run and is required for npm on some Windows systems.
