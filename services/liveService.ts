@@ -23,6 +23,7 @@ export class LiveService {
   private reconnectTimeout: number | null = null;
   private isReconnecting: boolean = false;
   private lastStudyMaterial: string = '';
+  private resumptionToken: string | null = null;
 
   constructor(config: LiveServiceConfig, audioContext: AudioContext) {
     this.config = config;
@@ -162,6 +163,7 @@ export class LiveService {
 
       this.session = await this.ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        ...(this.resumptionToken ? { sessionResumptionHandle: this.resumptionToken } : {}),
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
@@ -182,10 +184,14 @@ export class LiveService {
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           // Enable Context Window Compression for unlimited session duration
+          // Enable Context Window Compression for unlimited session duration
           contextWindowCompression: {
             slidingWindow: {}
           },
+          // Enable Session Resumption
+          sessionResumption: {}
         },
+
         callbacks: {
           onopen: () => {
             console.log('✅ Gemini Live Connected - Session ready');
@@ -258,6 +264,15 @@ export class LiveService {
       // CRITICAL: turnComplete without transcript means the turn ended
       // Send empty string to signal turn completion
       this.config.onTranscript("", false, true);
+    }
+
+    // Handle Session Resumption Update
+    if ((message as any).sessionResumptionUpdate) {
+      const update = (message as any).sessionResumptionUpdate;
+      if (update.handle) {
+        this.resumptionToken = update.handle;
+        console.log('📝 Session Resumption Token Updated');
+      }
     }
 
     // Handle Tool Calls
@@ -356,6 +371,7 @@ export class LiveService {
 
     this.reconnectTimeout = window.setTimeout(async () => {
       try {
+        console.log(this.resumptionToken ? '🔄 Resuming session with token...' : '🔄 Starting new session...');
         await this.connect(this.lastStudyMaterial);
         console.log('✅ Reconnection successful');
       } catch (error) {
