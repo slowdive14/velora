@@ -88,6 +88,7 @@ export class LiveService {
 
           **Tone**: Friendly, warm, supportive, curious
           **Response length**: Keep it SHORT (1-2 sentences) so they can keep talking
+          **Responsiveness**: ALWAYS respond to the user. If you didn't hear clearly or they stopped speaking, ask a gentle follow-up question. NEVER remain silent.
           **Remember**: The more THEY speak, the better!`;
 
       if (studyMaterial && studyMaterial.trim().length > 0) {
@@ -161,9 +162,8 @@ export class LiveService {
         }
       ];
 
-      this.session = await this.ai.live.connect({
+      const connectOptions: any = {
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-        ...(this.resumptionToken ? { sessionResumptionHandle: this.resumptionToken } : {}),
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
@@ -178,7 +178,7 @@ export class LiveService {
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
-              silenceDurationMs: 500,
+              silenceDurationMs: 800,
             }
           },
           inputAudioTranscription: {},
@@ -189,7 +189,9 @@ export class LiveService {
             slidingWindow: {}
           },
           // Enable Session Resumption
-          sessionResumption: {}
+          sessionResumption: {
+            ...(this.resumptionToken ? { handle: this.resumptionToken } : {})
+          }
         },
 
         callbacks: {
@@ -232,7 +234,14 @@ export class LiveService {
             this.config.onError(new Error('Connection error: ' + (err.message || 'Unknown error')));
           },
         },
+      };
+
+      console.log('🔌 Connecting to Gemini Live...', {
+        hasResumptionToken: !!this.resumptionToken,
+        tokenPreview: this.resumptionToken ? this.resumptionToken.substring(0, 10) + '...' : 'none'
       });
+
+      this.session = await this.ai.live.connect(connectOptions);
     } catch (error) {
       console.error('❌ Failed to connect to Gemini Live:', error);
       this.isConnected = false;
@@ -241,6 +250,14 @@ export class LiveService {
   }
 
   private async handleMessage(message: LiveServerMessage) {
+    // Debug: Log message keys to verify SessionResumptionUpdate
+    // console.log('Rx:', Object.keys(message)); 
+
+    // Handle GoAway Message (Server disconnect warning)
+    if ((message as any).goAway) {
+      console.warn('⚠️ GoAway Message Received:', (message as any).goAway);
+    }
+
     // Handle Audio
     const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
     if (audioData) {
@@ -269,9 +286,19 @@ export class LiveService {
     // Handle Session Resumption Update
     if ((message as any).sessionResumptionUpdate) {
       const update = (message as any).sessionResumptionUpdate;
-      if (update.handle) {
+      console.log('📦 Session Resumption Update Received:', update);
+
+      if (update.newHandle) {
+        this.resumptionToken = update.newHandle;
+        console.log('📝 Token Saved (newHandle):', this.resumptionToken.substring(0, 20) + '...');
+      } else if (update.sessionResumptionHandle) {
+        this.resumptionToken = update.sessionResumptionHandle;
+        console.log('📝 Token Saved (sessionResumptionHandle):', this.resumptionToken.substring(0, 20) + '...');
+      } else if (update.handle) {
         this.resumptionToken = update.handle;
-        console.log('📝 Session Resumption Token Updated');
+        console.log('📝 Token Saved (handle):', this.resumptionToken.substring(0, 20) + '...');
+      } else {
+        console.warn('⚠️ Session Resumption Update received but no handle found:', update);
       }
     }
 
