@@ -71,23 +71,21 @@ export function downsampleTo16k(input: Float32Array, sourceSampleRate: number): 
     return input;
   }
 
-  const ratio = sourceSampleRate / 16000;
-  const newLength = Math.round(input.length / ratio);
+  const targetSampleRate = 16000;
+  const ratio = sourceSampleRate / targetSampleRate;
+  const newLength = Math.ceil(input.length / ratio);
   const result = new Float32Array(newLength);
 
   for (let i = 0; i < newLength; i++) {
-    const startOffset = Math.floor(i * ratio);
-    const endOffset = Math.floor((i + 1) * ratio);
-    let sum = 0;
-    let count = 0;
+    const originalIndex = i * ratio;
+    const index1 = Math.floor(originalIndex);
+    const index2 = Math.min(index1 + 1, input.length - 1);
+    const fraction = originalIndex - index1;
 
-    for (let j = startOffset; j < endOffset && j < input.length; j++) {
-      sum += input[j];
-      count++;
-    }
-
-    // Block averaging acts as a simple low-pass filter to prevent aliasing
-    result[i] = count > 0 ? sum / count : 0;
+    // Linear Interpolation
+    const value1 = input[index1];
+    const value2 = input[index2];
+    result[i] = value1 + (value2 - value1) * fraction;
   }
 
   return result;
