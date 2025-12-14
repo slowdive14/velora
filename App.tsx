@@ -6,77 +6,17 @@ import { blobToBase64, downsampleTo16k } from './utils/audioUtils';
 import { diffWords } from './utils/diffUtils';
 
 // --- Audio Worklet Code (Blob) ---
-// We buffer ~4096 samples (approx 250ms at 16kHz).
-// Larger chunks reduce network overhead and prevent "Network Error" disconnects.
-const PCM_PROCESSOR_CODE = `
-class PCMProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.bufferSize = 4096;
-    this.buffer = new Float32Array(this.bufferSize);
-    this.index = 0;
-  }
+// Moved to public/pcm-processor.js to run on audio thread and avoid main thread blocking
 
-  process(inputs, outputs, parameters) {
-    const input = inputs[0];
-    if (input && input.length > 0) {
-      const channel = input[0];
-      for (let i = 0; i < channel.length; i++) {
-        this.buffer[this.index++] = channel[i];
-        // When buffer is full, flush to main thread
-        if (this.index >= this.bufferSize) {
-          this.port.postMessage(this.buffer);
-          this.index = 0;
-        }
-      }
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-processor', PCMProcessor);
-`;
 
 // --- Components ---
 
-const CorrectionPill: React.FC<{ correction: Correction; index: number; onOpen: () => void }> = ({ correction, index, onOpen }) => {
-    const [visible, setVisible] = useState(true);
+import { CorrectionPill } from './components/CorrectionPill';
+import { PracticeMode } from './components/PracticeMode';
 
-    useEffect(() => {
-        const timer = setTimeout(() => setVisible(false), 8000);
-        return () => clearTimeout(timer);
-    }, []);
+// --- Components ---
 
-    if (!visible) return null;
 
-    return (
-        <button
-            onClick={onOpen}
-            className="fixed right-6 z-50 pointer-events-auto bg-black/70 backdrop-blur-xl border border-violet-500/30 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:scale-105 transition-all group animate-slide-in"
-            style={{
-                bottom: `${96 + index * 80}px`,
-                animation: 'slideInRight 0.3s ease-out'
-            }}
-        >
-            {/* Original (strikethrough) */}
-            <span className="text-red-300 line-through text-sm opacity-70 font-medium">
-                {correction.original}
-            </span>
-
-            {/* Arrow */}
-            <span className="text-gray-500 text-xs">→</span>
-
-            {/* Corrected */}
-            <span className="text-green-400 font-bold text-sm">
-                {correction.corrected}
-            </span>
-
-            {/* Practice Icon */}
-            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-2 group-hover:bg-violet-500 transition-colors">
-                <Play className="w-3 h-3" />
-            </div>
-        </button>
-    );
-};
 
 export default function App() {
     // Detect mobile device
@@ -106,6 +46,7 @@ export default function App() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
     const workletNodeRef = useRef<AudioWorkletNode | null>(null);
     const liveServiceRef = useRef<LiveService | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -353,6 +294,14 @@ export default function App() {
         ctx.save();
         ctx.translate(0, height / 2);
 
+        // Get Real Audio Data if available
+        let dataArray: Uint8Array | null = null;
+        if (analyserRef.current) {
+            const bufferLength = analyserRef.current.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            analyserRef.current.getByteTimeDomainData(dataArray);
+        }
+
         // Animated Wave
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(248, 113, 113, 0.8)'; // Red-400
@@ -361,21 +310,38 @@ export default function App() {
         ctx.shadowColor = 'rgba(248, 113, 113, 0.5)';
         ctx.shadowBlur = 10;
 
-        const amplitude = 50;
+        const sliceWidth = width * 1.0 / (dataArray ? dataArray.length : 100);
+        let x = 0;
 
-        // Draw multiple lines for a "thick" wave effect
-        for (let i = 0; i < 3; i++) {
-            ctx.beginPath();
-            ctx.globalAlpha = 1 - (i * 0.3);
-            for (let x = 0; x < width; x += 5) {
-                const y = Math.sin(x * 0.01 + time * 0.003 + i) *
-                    Math.sin(x * 0.003 + time * 0.001) * // Envelope
-                    amplitude;
-                if (x === 0) ctx.moveTo(x, y);
+        if (dataArray) {
+            // Draw Real Audio Wave
+            for (let i = 0; i < dataArray.length; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = v * 50 - 50; // Scale amplitude
+
+                if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
+
+                x += sliceWidth;
             }
-            ctx.stroke();
+        } else {
+            // Fallback: Simulated Wave
+            const amplitude = 50;
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.globalAlpha = 1 - (i * 0.3);
+                for (let x = 0; x < width; x += 5) {
+                    const y = Math.sin(x * 0.01 + time * 0.003 + i) *
+                        Math.sin(x * 0.003 + time * 0.001) * // Envelope
+                        amplitude;
+                    if (x === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
         }
+
+        if (dataArray) ctx.stroke();
 
         ctx.restore();
 
@@ -440,17 +406,32 @@ export default function App() {
     // --- Audio & Live Service Setup ---
 
     const setupAudioContext = async () => {
-        // Native 16kHz context prevents resampling artifacts and improves connection stability
+        // Use native hardware sample rate (usually 48kHz) to avoid browser resampling
+        // The AudioWorklet will downsample to 16kHz for Gemini API
         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
             latencyHint: 'interactive',
-            sampleRate: 16000,
+            // No sampleRate specified - use hardware native rate for best quality
         });
         await ctx.resume();
 
-        // Load AudioWorklet
-        const blob = new Blob([PCM_PROCESSOR_CODE], { type: 'application/javascript' });
-        const url = URL.createObjectURL(blob);
-        await ctx.audioWorklet.addModule(url);
+        console.log(`🎵 AudioContext created: ${ctx.sampleRate}Hz (native) → 16kHz (Gemini)`);
+
+        // Load AudioWorklet from public folder
+        // Use import.meta.env.BASE_URL to respect Vite's base path configuration
+        const workletPath = `${import.meta.env.BASE_URL}pcm-processor.js`;
+        try {
+            console.log(`🎧 Loading AudioWorklet from: ${workletPath}`);
+            await ctx.audioWorklet.addModule(workletPath);
+            console.log('✅ AudioWorklet loaded successfully');
+        } catch (e) {
+            console.error("❌ Failed to load audio worklet:", e);
+            throw e;
+        }
+
+        // Create Analyser Node for Visualization
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
 
         return ctx;
     };
@@ -651,14 +632,14 @@ export default function App() {
                     lastRoleRef.current = null; // Reset so next AI text starts fresh turn
                 }
 
-                // Add to corrections list
-                correctionsRef.current = [...correctionsRef.current, correction];
-                setCorrections(prev => [...prev, correction]);
+                // Add to corrections list (keep only last 10 to prevent memory bloat)
+                const newCorrections = [...correctionsRef.current, correction].slice(-10);
+                correctionsRef.current = newCorrections;
+                setCorrections(newCorrections);
+                console.log(`📝 Correction added! Total: ${newCorrections.length}`, correction);
 
-                // Auto-trigger Practice Mode (desktop only to avoid interrupting mobile conversation flow)
-                if (!isMobile) {
-                    enterPracticeMode(correction);
-                }
+                // User can click the pill to review
+                // Pill auto-dismisses after 5 seconds
             },
             onClose: () => {
                 setStatus('disconnected');
@@ -677,6 +658,11 @@ export default function App() {
         // 3. Use AudioWorklet to capture mic
         const source = ctx.createMediaStreamSource(streamRef.current);
 
+        // Connect to Analyser for Visualization
+        if (analyserRef.current) {
+            source.connect(analyserRef.current);
+        }
+
         // High-Pass Filter to remove low-frequency rumble/handling noise (common on mobile)
         // CRITICAL: Use 50Hz instead of 100Hz to preserve male voice frequencies (85-180Hz)
         const highPassFilter = ctx.createBiquadFilter();
@@ -686,15 +672,12 @@ export default function App() {
         const worklet = new AudioWorkletNode(ctx, 'pcm-processor');
 
         worklet.port.onmessage = (event) => {
-            let inputData = event.data as Float32Array;
+            const inputData = event.data as Float32Array;
 
-            // CRITICAL: Mobile browsers (iOS) often ignore sampleRate: 16000.
-            // We must downsample manually if the context is running at a different rate (e.g. 44.1k/48k).
-            if (ctx.sampleRate !== 16000) {
-                inputData = downsampleTo16k(inputData, ctx.sampleRate);
-            }
+            // Downsampling is now handled inside the AudioWorklet (pcm-processor.js)
+            // This prevents main thread blocking and UI jitter
 
-            // Block audio to AI during Practice Mode
+            // MUTE during Practice Mode - let user practice speaking without AI responding
             if (!isPracticeModeRef.current) {
                 liveServiceRef.current?.sendAudioChunk(inputData);
             }
@@ -1034,119 +1017,27 @@ export default function App() {
                 </div>
             </main>
 
-            {/* Correction Pills - Show last 3 corrections */}
-            {/* Correction Pills - REMOVED (Auto-open implemented) */}
-
-
             {/* Practice Mode Overlay */}
             {
                 isPracticeMode && currentPractice && (
-                    <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-fadeIn">
-                        <div className="max-w-5xl w-full bg-[#09090b] border border-white/10 rounded-3xl p-8 shadow-2xl flex flex-col gap-8 max-h-[90vh] overflow-y-auto">
-
-                            {/* Mic Muted Indicator */}
-                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-center gap-2">
-                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                                <span className="text-red-300 text-sm font-medium">
-                                    🎤 Microphone muted during practice
-                                </span>
-                            </div>
-
-                            {/* 1. Topic Initiation (Top) */}
-                            <div className="text-center space-y-2">
-                                <span className="text-xs font-bold text-violet-400 tracking-widest uppercase">Current Topic</span>
-                                <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight">
-                                    "{currentPractice.aiContext || "Conversation Practice"}"
-                                </h2>
-                            </div>
-
-                            {/* Comparison Area */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-
-                                {/* 2. User Speech (Left Grey Bubble) */}
-                                <div className="flex flex-col gap-3">
-                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">You Said</span>
-                                    <div className="bg-[#27272a] rounded-3xl rounded-tl-none p-6 relative group">
-                                        <p className="text-xl text-gray-300 leading-relaxed font-medium">
-                                            {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
-                                                if (part.type === 'removed') {
-                                                    return (
-                                                        <span key={i} className="text-red-400 bg-red-500/10 px-1 rounded mx-0.5 line-through decoration-red-400/50 decoration-2">
-                                                            {part.value}
-                                                        </span>
-                                                    );
-                                                }
-                                                if (part.type === 'equal') {
-                                                    return <span key={i}>{part.value} </span>;
-                                                }
-                                                return null;
-                                            })}
-                                        </p>
-                                        {/* Listening Indicator (Visual only for now) */}
-                                        <div className="absolute bottom-4 right-6 flex items-center gap-2 opacity-50">
-                                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                                            <span className="text-xs text-gray-400 font-medium">Recorded</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* 4. AI Correction (Right Blue Bubble) */}
-                                <div className="flex flex-col gap-3">
-                                    <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider ml-1">Try Saying This</span>
-                                    <div className="bg-[#1e3a8a] rounded-3xl rounded-tr-none p-6 shadow-[0_0_40px_-10px_rgba(30,58,138,0.5)] relative overflow-hidden">
-                                        {/* Shine Effect */}
-                                        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
-
-                                        <p className="text-xl text-white leading-relaxed font-medium relative z-10">
-                                            {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
-                                                if (part.type === 'added') {
-                                                    return (
-                                                        <span key={i} className="text-green-300 font-bold bg-green-500/20 px-1 rounded mx-0.5">
-                                                            {part.value}
-                                                        </span>
-                                                    );
-                                                }
-                                                if (part.type === 'equal') {
-                                                    return <span key={i}>{part.value} </span>;
-                                                }
-                                                return null;
-                                            })}
-                                        </p>
-                                        <p className="text-violet-400/60 text-sm">
-                                            Improved phrasing and word choice for clarity and flow.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Action Buttons */}
-                                <div className="flex gap-4 mt-auto pt-4 border-t border-white/5">
-                                    <button
-                                        onClick={exitPracticeMode}
-                                        className="flex-1 px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold transition-all"
-                                    >
-                                        Close
-                                    </button>
-                                    <button
-                                        onClick={generateContextualReprompt}
-                                        disabled={status !== 'connected'}
-                                        className="flex-1 px-8 py-4 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 text-violet-200 font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <AlertCircle className="w-4 h-4" />
-                                        Ask AI More
-                                    </button>
-                                    <button
-                                        onClick={exitPracticeMode}
-                                        className="flex-1 px-8 py-4 rounded-xl bg-white text-black font-bold hover:scale-[1.02] transition-all shadow-xl flex items-center justify-center gap-2"
-                                    >
-                                        <Play className="w-4 h-4 fill-current" />
-                                        Practice Speaking
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <PracticeMode
+                        currentPractice={currentPractice}
+                        onClose={exitPracticeMode}
+                        onReprompt={generateContextualReprompt}
+                        connectionStatus={status}
+                    />
                 )
             }
+
+            {/* Correction Pill - Show ONLY the latest one, non-intrusive */}
+            {corrections.length > 0 && (
+                <CorrectionPill
+                    key={corrections[corrections.length - 1].timestamp}
+                    correction={corrections[corrections.length - 1]}
+                    index={0}
+                    onOpen={() => enterPracticeMode(corrections[corrections.length - 1])}
+                />
+            )}
 
             {
                 !hasApiKey && showApiKeyModal && (
@@ -1247,22 +1138,6 @@ export default function App() {
                     </div>
                 )
             }
-            {/* Version Indicator & Debug */}
-            <div className="fixed bottom-2 right-2 flex flex-col items-end gap-2 pointer-events-none z-50">
-                <div className="text-[10px] text-white/20">v2.2 (Mic Block + Re-prompt)</div>
-                <button
-                    onClick={() => enterPracticeMode({
-                        original: "I think AI is the most useful invention of all time in humanity.",
-                        corrected: "I think AI is the most useful invention of all time for humanity.",
-                        explanation: "Use 'for humanity' to express benefit to mankind.",
-                        timestamp: Date.now(),
-                        aiContext: "That's a bold statement! Let's refine that preposition."
-                    })}
-                    className="pointer-events-auto bg-red-500/20 hover:bg-red-500/40 text-red-200 text-xs px-2 py-1 rounded border border-red-500/30 transition-colors"
-                >
-                    Test UI
-                </button>
-            </div>
         </div >
     );
 }

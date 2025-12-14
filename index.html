@@ -26,11 +26,20 @@
   <link rel="stylesheet" href="/index.css">
   <link rel="manifest" href="./manifest.json">
   <script>
-    if ('serviceWorker' in navigator) {
+    // Only register Service Worker in production (not during development)
+    if ('serviceWorker' in navigator && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./service-worker.js')
-          .then(registration => console.log('SW registered: ', registration))
-          .catch(registrationError => console.log('SW registration failed: ', registrationError));
+          .then(registration => console.log('✅ SW registered: ', registration))
+          .catch(registrationError => console.log('❌ SW registration failed: ', registrationError));
+      });
+    } else if ('serviceWorker' in navigator) {
+      // In development: unregister any existing service workers
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations.forEach(registration => {
+          registration.unregister();
+          console.log('🔧 DEV MODE: Service Worker unregistered');
+        });
       });
     }
   </script>
