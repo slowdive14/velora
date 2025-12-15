@@ -16,7 +16,9 @@ import { PracticeMode } from './components/PracticeMode';
 
 // --- Components ---
 
-
+// Pre-compiled regex patterns for transcript sanitization (performance optimization)
+const CTRL_CHAR_REGEX = /<ctrl\d+>/g;
+const CONTROL_CHAR_REGEX = /[\x00-\x1F\x7F-\x9F]/g;
 
 export default function App() {
     // Detect mobile device
@@ -68,6 +70,7 @@ export default function App() {
 
     const lastRoleRef = useRef<'user' | 'ai' | null>(null);
     const transcriptTurnCountRef = useRef<number>(-1); // Track turn index for corrections
+    const turnStartTimeRef = useRef<number>(0); // Track turn latency for performance monitoring
 
     // Timer State
     const [elapsedTime, setElapsedTime] = useState("00:00");
@@ -524,6 +527,11 @@ export default function App() {
                     // Role changed! Finalize the previous role's turn
                     if (lastRoleRef.current === 'user') {
                         // User turn ended, AI started speaking
+                        // Log turn latency for performance monitoring
+                        if (turnStartTimeRef.current > 0) {
+                            const turnDuration = performance.now() - turnStartTimeRef.current;
+                            console.log(`⚡ Turn latency: ${turnDuration.toFixed(0)}ms`);
+                        }
                         if (userTranscriptBufferRef.current.trim()) {
                             transcriptHistoryRef.current.push({ role: 'user', text: userTranscriptBufferRef.current });
                             transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
@@ -569,11 +577,15 @@ export default function App() {
                     // CRITICAL: Filter out control characters and HTML-like tags
                     // DO NOT trim() individual chunks - it removes spaces between words!
                     const sanitizedText = text
-                        .replace(/<ctrl\d+>/g, '') // Remove <ctrl46> etc
-                        .replace(/[\x00-\x1F\x7F-\x9F]/g, ''); // Remove control characters
+                        .replace(CTRL_CHAR_REGEX, '') // Remove <ctrl46> etc (pre-compiled regex)
+                        .replace(CONTROL_CHAR_REGEX, ''); // Remove control characters (pre-compiled regex)
 
                     if (sanitizedText) {
                         if (isUser) {
+                            // Track turn start time for latency monitoring
+                            if (userTranscriptBufferRef.current === "") {
+                                turnStartTimeRef.current = performance.now();
+                            }
                             userTranscriptBufferRef.current += sanitizedText;
                         } else {
                             aiTranscriptBufferRef.current += sanitizedText;
@@ -702,8 +714,8 @@ export default function App() {
 
         workletNodeRef.current = worklet;
 
-        // 4. Start Video Transmission
-        startVideoTransmission();
+        // 4. Video Transmission - Disabled for better performance
+        // startVideoTransmission();
     };
 
     const startVideoTransmission = () => {

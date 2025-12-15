@@ -62,7 +62,7 @@ export class LiveService {
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
-              silenceDurationMs: 400, // Reduced from 800ms for faster turn-taking
+              silenceDurationMs: 300, // Optimized for natural conversation flow (reduced from 400ms)
             }
           },
           inputAudioTranscription: {},
