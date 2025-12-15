@@ -646,8 +646,16 @@ export default function App() {
                         transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
                     }
 
-                    // Associate correction with this AI turn
-                    correction.turnIndex = transcriptTurnCountRef.current;
+                    // Associate correction with the last USER turn (the error was in user's speech)
+                    // Find the last user turn in the transcript history
+                    let lastUserTurnIndex = -1;
+                    for (let i = transcriptHistoryRef.current.length - 1; i >= 0; i--) {
+                        if (transcriptHistoryRef.current[i].role === 'user') {
+                            lastUserTurnIndex = i;
+                            break;
+                        }
+                    }
+                    correction.turnIndex = lastUserTurnIndex;
 
                     // Only update display if not already finalized
                     if (!alreadyFinalized) {
@@ -866,8 +874,8 @@ export default function App() {
             const role = entry.role === 'user' ? '**User**' : '**AI**';
             mdContent += `${role}: ${entry.text}\n\n`;
 
-            // Insert corrections that belong to this turn
-            if (entry.role === 'ai') {
+            // Insert corrections that belong to this turn (corrections are for user's speech)
+            if (entry.role === 'user') {
                 const correctionsForThisTurn = correctionsRef.current.filter(
                     c => c.turnIndex === index
                 );
