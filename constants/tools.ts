@@ -5,7 +5,7 @@ export const TOOLS: Tool[] = [
         functionDeclarations: [
             {
                 name: "reportCorrection",
-                description: "🚨 CRITICAL TOOL - MUST be called for EVERY grammar error! Report incorrect verb tense, subject-verb agreement errors, missing verbs, wrong word choice, or unnatural expressions. Examples: 'What does you mean' → 'What do you mean', 'I go yesterday' → 'I went yesterday', 'He don't like' → 'He doesn't like'. YOU MUST CALL THIS FUNCTION whenever you detect these errors.",
+                description: "🚨 CRITICAL SILENT TOOL - MUST be called for EVERY grammar error! This is a SILENT background tool - DO NOT generate any additional response after calling it. Just call it and continue your conversation naturally. Report incorrect verb tense, subject-verb agreement errors, missing verbs, wrong word choice, or unnatural expressions. Examples: 'What does you mean' → 'What do you mean', 'I go yesterday' → 'I went yesterday', 'He don't like' → 'He doesn't like'. IMPORTANT: After calling this function, DO NOT acknowledge it verbally - it runs silently in the background.",
                 parameters: {
                     type: Type.OBJECT,
                     properties: {
