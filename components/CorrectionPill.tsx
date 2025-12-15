@@ -26,20 +26,15 @@ export const CorrectionPill: React.FC<CorrectionPillProps> = ({ correction, inde
 
     if (!visible) return null;
 
-    // Extract first key words for compact display
-    const getShortText = (text: string, maxLength: number = 30) => {
-        return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
-    };
-
     return (
         <button
             onClick={onOpen}
-            className="fixed top-24 md:top-20 left-4 right-4 md:left-auto md:right-6 md:max-w-md z-[9999] pointer-events-auto bg-violet-600/95 backdrop-blur-md border-2 border-violet-400/50 text-white px-4 py-3 rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-2 text-sm"
+            className="fixed top-24 md:top-20 left-4 right-4 md:left-auto md:right-6 md:max-w-md z-[9999] pointer-events-auto bg-violet-600/95 backdrop-blur-md border-2 border-violet-400/50 text-white px-4 py-4 rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-start gap-2 text-sm"
         >
-            <div className="flex-1 flex items-center gap-2 min-w-0">
-                <span className="opacity-80 line-through truncate">{getShortText(correction.original, 25)}</span>
+            <div className="flex-1 flex items-start gap-2 min-w-0">
+                <span className="opacity-80 line-through break-words">{correction.original}</span>
                 <span className="opacity-50 flex-shrink-0">→</span>
-                <span className="font-semibold truncate">{getShortText(correction.corrected, 25)}</span>
+                <span className="font-semibold break-words">{correction.corrected}</span>
             </div>
             <Play className="w-4 h-4 opacity-60 flex-shrink-0" />
         </button>
