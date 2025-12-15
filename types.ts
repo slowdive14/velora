@@ -28,6 +28,7 @@ export interface Correction {
   explanation: string;
   timestamp: number;
   aiContext?: string; // The AI's response text surrounding this correction
+  turnIndex?: number; // Which transcript turn this correction belongs to
 }
 
 export interface TranscriptEntry {

@@ -67,6 +67,7 @@ export default function App() {
     const aiTranscriptBufferRef = useRef<string>("");
 
     const lastRoleRef = useRef<'user' | 'ai' | null>(null);
+    const transcriptTurnCountRef = useRef<number>(-1); // Track turn index for corrections
 
     // Timer State
     const [elapsedTime, setElapsedTime] = useState("00:00");
@@ -525,6 +526,7 @@ export default function App() {
                         // User turn ended, AI started speaking
                         if (userTranscriptBufferRef.current.trim()) {
                             transcriptHistoryRef.current.push({ role: 'user', text: userTranscriptBufferRef.current });
+                            transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
 
                             // Remove streaming turn before adding finalized turn
                             const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
@@ -542,6 +544,7 @@ export default function App() {
                         // AI turn ended, User started speaking
                         if (aiTranscriptBufferRef.current.trim()) {
                             transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+                            transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
 
                             // Remove streaming turn before adding finalized turn
                             const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
@@ -617,6 +620,10 @@ export default function App() {
 
                     // Finalize AI turn
                     transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+                    transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
+
+                    // Associate correction with this AI turn
+                    correction.turnIndex = transcriptTurnCountRef.current;
 
                     // Remove streaming turn before adding finalized turn
                     const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
@@ -828,9 +835,20 @@ export default function App() {
             mdContent += `## Study Material\n\n${studyMaterial}\n\n---\n\n`;
         }
 
-        transcriptHistoryRef.current.forEach(entry => {
+        transcriptHistoryRef.current.forEach((entry, index) => {
             const role = entry.role === 'user' ? '**User**' : '**AI**';
             mdContent += `${role}: ${entry.text}\n\n`;
+
+            // Insert corrections that belong to this turn
+            if (entry.role === 'ai') {
+                const correctionsForThisTurn = correctionsRef.current.filter(
+                    c => c.turnIndex === index
+                );
+
+                correctionsForThisTurn.forEach(correction => {
+                    mdContent += `  → *Correction: "${correction.original}" → "${correction.corrected}"*\n\n`;
+                });
+            }
         });
 
         try {
