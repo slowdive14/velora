@@ -630,22 +630,37 @@ export default function App() {
                     const recentContext = sentences.slice(-2).join(' ').trim();
                     correction.aiContext = recentContext || text;
 
-                    // Finalize AI turn
-                    transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
-                    transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
+                    // Check if AI turn was already finalized by role change
+                    // If the last entry in history matches current buffer, it was already added
+                    const lastEntry = transcriptHistoryRef.current[transcriptHistoryRef.current.length - 1];
+                    const alreadyFinalized = lastEntry &&
+                                             lastEntry.role === 'ai' &&
+                                             lastEntry.text === aiTranscriptBufferRef.current;
+
+                    if (!alreadyFinalized) {
+                        // Finalize AI turn (first time)
+                        transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+                        transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
+                    } else {
+                        // Turn already finalized, use existing index
+                        transcriptTurnCountRef.current = transcriptHistoryRef.current.length - 1;
+                    }
 
                     // Associate correction with this AI turn
                     correction.turnIndex = transcriptTurnCountRef.current;
 
-                    // Remove streaming turn before adding finalized turn
-                    const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
-                    const newTurns = [...completedTurns, {
-                        role: 'ai' as const,
-                        text: aiTranscriptBufferRef.current,
-                        id: turnIdCounter.current++
-                    }].slice(-4);
-                    recentTurnsRef.current = newTurns;
-                    setRecentTurns(newTurns);
+                    // Only update display if not already finalized
+                    if (!alreadyFinalized) {
+                        // Remove streaming turn before adding finalized turn
+                        const completedTurns = recentTurnsRef.current.filter(t => t.id !== -1);
+                        const newTurns = [...completedTurns, {
+                            role: 'ai' as const,
+                            text: aiTranscriptBufferRef.current,
+                            id: turnIdCounter.current++
+                        }].slice(-4);
+                        recentTurnsRef.current = newTurns;
+                        setRecentTurns(newTurns);
+                    }
 
                     aiTranscriptBufferRef.current = ""; // Clear buffer
                     lastRoleRef.current = null; // Reset so next AI text starts fresh turn
