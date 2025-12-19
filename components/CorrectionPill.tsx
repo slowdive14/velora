@@ -13,11 +13,11 @@ export const CorrectionPill: React.FC<CorrectionPillProps> = ({ correction, inde
 
     useEffect(() => {
         console.log(`✨ NEW Pill created: "${correction.original}" → "${correction.corrected}"`);
-        // Auto-dismiss after 5 seconds (non-intrusive)
+        // Auto-dismiss after 7 seconds (non-intrusive)
         const timer = setTimeout(() => {
-            console.log(`⏰ Pill auto-dismissed after 5s`);
+            console.log(`⏰ Pill auto-dismissed after 7s`);
             setVisible(false);
-        }, 5000);
+        }, 7000);
         return () => {
             console.log(`🗑️ Pill cleanup`);
             clearTimeout(timer);
