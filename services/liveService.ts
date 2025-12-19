@@ -47,7 +47,7 @@ export class LiveService {
       const tools = TOOLS;
 
       const connectOptions: any = {
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
