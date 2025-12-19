@@ -657,6 +657,15 @@ export default function App() {
                     }
                     correction.turnIndex = lastUserTurnIndex;
 
+                    // CRITICAL: Use the actual transcript text as "original", not AI's interpretation
+                    // The AI model and transcription service may hear/interpret differently
+                    if (lastUserTurnIndex >= 0 && transcriptHistoryRef.current[lastUserTurnIndex]) {
+                        const actualUserText = transcriptHistoryRef.current[lastUserTurnIndex].text;
+                        if (actualUserText && actualUserText.trim()) {
+                            correction.original = actualUserText.trim();
+                        }
+                    }
+
                     // Only update display if not already finalized
                     if (!alreadyFinalized) {
                         // Remove streaming turn before adding finalized turn
