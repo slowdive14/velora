@@ -76,6 +76,8 @@ export default function App() {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const aiAudioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+    const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+    const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
     const nextStartTimeRef = useRef<number>(0);
     const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const renderLoopRef = useRef<number | null>(null);
@@ -170,6 +172,11 @@ export default function App() {
             setRecentTurns([]);
             streamRef.current?.getTracks().forEach(track => track.stop());
             liveServiceRef.current?.disconnect();
+            if (playbackAudioRef.current) {
+                playbackAudioRef.current.pause();
+                playbackAudioRef.current.srcObject = null;
+            }
+            playbackDestRef.current = null;
             audioContextRef.current?.close();
         };
     }, []);
@@ -527,9 +534,17 @@ export default function App() {
         audioContextRef.current = ctx;
         aiAudioDestinationRef.current = ctx.createMediaStreamDestination();
 
-        // CRITICAL: For proper Bluetooth/headset routing on mobile, connect directly to ctx.destination
-        // The system automatically routes ctx.destination to the active audio output device (speaker/Bluetooth/headset)
-        console.log("🔊 Audio routing: Using AudioContext.destination for system-level Bluetooth support");
+        // Route AI audio through <audio> element for mobile Bluetooth (A2DP) compatibility
+        // getUserMedia puts mobile browsers in "communication" mode (HFP), which routes ctx.destination to earpiece/speaker
+        // <audio> element uses "media" audio session, properly routing to Bluetooth headphones
+        playbackDestRef.current = ctx.createMediaStreamDestination();
+        if (!playbackAudioRef.current) {
+            playbackAudioRef.current = new Audio();
+            playbackAudioRef.current.autoplay = true;
+        }
+        playbackAudioRef.current.srcObject = playbackDestRef.current.stream;
+        playbackAudioRef.current.play().catch(console.warn);
+        console.log("🔊 Audio routing: Using <audio> element proxy for mobile Bluetooth A2DP support");
 
         nextStartTimeRef.current = 0;
 
@@ -554,8 +569,12 @@ export default function App() {
                 const source = ctx.createBufferSource();
                 source.buffer = buffer;
 
-                // Connect to speakers + recording stream
-                source.connect(ctx.destination);
+                // Connect to playback (via <audio> element for Bluetooth) + recording stream
+                if (playbackDestRef.current) {
+                    source.connect(playbackDestRef.current);
+                } else {
+                    source.connect(ctx.destination); // Fallback
+                }
                 if (aiAudioDestinationRef.current) {
                     source.connect(aiAudioDestinationRef.current);
                 }
@@ -1007,6 +1026,13 @@ export default function App() {
         setShowReport(false);
 
         if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+
+        // Cleanup playback audio element
+        if (playbackAudioRef.current) {
+            playbackAudioRef.current.pause();
+            playbackAudioRef.current.srcObject = null;
+        }
+        playbackDestRef.current = null;
 
         // Cleanup AudioContext to release hardware
         if (audioContextRef.current) {
