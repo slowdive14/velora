@@ -188,3 +188,4 @@ If you encounter `PSSecurityException` or `UnauthorizedAccess` errors when runni
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 ```
 This allows scripts signed by a trusted publisher to run and is required for npm on some Windows systems.
+

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Play, AlertCircle } from 'lucide-react';
 import { Correction, ConnectionStatus } from '../types';
 import { diffWords } from '../utils/diffUtils';
@@ -16,6 +16,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     onReprompt,
     connectionStatus
 }) => {
+    // Memoize diffWords result to avoid duplicate computation
+    const diff = useMemo(
+        () => diffWords(currentPractice.original, currentPractice.corrected),
+        [currentPractice.original, currentPractice.corrected]
+    );
+
     return (
         <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-3 animate-fadeIn">
             <div className="max-w-6xl w-full bg-[#09090b] border border-white/10 rounded-2xl shadow-2xl flex flex-col gap-3 p-4 max-h-[92vh] overflow-y-auto">
@@ -36,7 +42,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">You Said</span>
                         <div className="bg-[#27272a] rounded-2xl rounded-tl-none p-4 relative">
                             <p className="text-base text-gray-300 leading-relaxed font-medium">
-                                {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                                {diff.map((part, i) => {
                                     if (part.type === 'removed') {
                                         return (
                                             <span key={i} className="text-red-400 bg-red-500/10 px-1 rounded mx-0.5 line-through decoration-red-400/50 decoration-2">
@@ -58,7 +64,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
                         <span className="text-xs font-bold text-green-500 uppercase tracking-wider ml-1">Correct Version - Practice!</span>
                         <div className="bg-green-900/20 border border-green-500/30 rounded-2xl rounded-tr-none p-4 relative shadow-[0_0_30px_-10px_rgba(34,197,94,0.2)]">
                             <p className="text-lg text-green-100 leading-relaxed font-bold">
-                                {diffWords(currentPractice.original, currentPractice.corrected).map((part, i) => {
+                                {diff.map((part, i) => {
                                     if (part.type === 'added') {
                                         return (
                                             <span key={i} className="text-green-300 font-bold bg-green-500/20 px-1 rounded mx-0.5">

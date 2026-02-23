@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { Video, Play, Download, Settings2, AlertCircle, Camera, CameraOff, FileText, Key, Copy } from 'lucide-react';
 import { LiveService } from './services/liveService';
 import { Message, ConnectionStatus, Correction } from './types';
@@ -13,12 +13,32 @@ import { diffWords } from './utils/diffUtils';
 
 import { CorrectionPill } from './components/CorrectionPill';
 import { PracticeMode } from './components/PracticeMode';
+import { SessionReport } from './components/SessionReport';
 
 // --- Components ---
 
 // Pre-compiled regex patterns for transcript sanitization (performance optimization)
 const CTRL_CHAR_REGEX = /<ctrl\d+>/g;
 const CONTROL_CHAR_REGEX = /[\x00-\x1F\x7F-\x9F]/g;
+
+// Memoized subtitle turn component to reduce re-renders during rapid streaming
+type SubtitleTurn = { role: 'user' | 'ai'; text: string; id: number };
+
+const TurnBubble = memo(({ turn }: { turn: SubtitleTurn }) => (
+    <div
+        className={`mb-4 max-w-[85%] md:max-w-[60%] p-4 rounded-2xl backdrop-blur-md shadow-lg transition-all duration-500 animate-slide-up ${turn.role === 'user'
+            ? 'self-start bg-slate-900/90 text-white rounded-bl-none border border-slate-700/50'
+            : 'self-end bg-blue-900/90 text-white rounded-br-none border border-blue-700/50'
+            }`}
+    >
+        <div className={`text-xs font-bold mb-1 ${turn.role === 'user' ? 'text-slate-400' : 'text-blue-300'}`}>
+            {turn.role === 'user' ? 'YOU' : 'AI'}
+        </div>
+        <div className="text-sm md:text-base leading-relaxed break-words">
+            {turn.text}
+        </div>
+    </div>
+));
 
 export default function App() {
     // Detect mobile device
@@ -27,7 +47,7 @@ export default function App() {
     });
 
     const [apiKey, setApiKey] = useState<string>(() => {
-        return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || "";
+        return localStorage.getItem('gemini_api_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
     });
     const [hasApiKey, setHasApiKey] = useState(!!apiKey);
     const [showApiKeyModal, setShowApiKeyModal] = useState(!apiKey);
@@ -39,9 +59,11 @@ export default function App() {
     const [corrections, setCorrections] = useState<Correction[]>([]);
     const [isPracticeMode, setIsPracticeMode] = useState(false);
     const [currentPractice, setCurrentPractice] = useState<Correction | null>(null);
+    const [showReport, setShowReport] = useState(false); // Session Report Modal State
     const isCameraOnRef = useRef(false);
     const isRecordingRef = useRef(false);
     const correctionsRef = useRef<Correction[]>([]);
+    const finalDurationRef = useRef<string>("00:00");
     const isPracticeModeRef = useRef(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -55,13 +77,17 @@ export default function App() {
     const chunksRef = useRef<Blob[]>([]);
     const aiAudioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
     const nextStartTimeRef = useRef<number>(0);
+    const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const renderLoopRef = useRef<number | null>(null);
 
     // Subtitle State - Show recent 4 turns
-    type SubtitleTurn = { role: 'user' | 'ai'; text: string; id: number };
     const [recentTurns, setRecentTurns] = useState<SubtitleTurn[]>([]);
     const recentTurnsRef = useRef<SubtitleTurn[]>([]);
     const turnIdCounter = useRef<number>(0);
+
+    // Debounce refs for React render optimization
+    const pendingTurnsRef = useRef<SubtitleTurn[] | null>(null);
+    const turnsTimeoutRef = useRef<number | null>(null);
 
     // Transcript History for Download
     const transcriptHistoryRef = useRef<{ role: 'user' | 'ai'; text: string }[]>([]);
@@ -136,6 +162,7 @@ export default function App() {
         return () => {
             if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
             if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+            if (turnsTimeoutRef.current) clearTimeout(turnsTimeoutRef.current);
             // Clean up subtitle state
             userTranscriptBufferRef.current = "";
             aiTranscriptBufferRef.current = "";
@@ -157,7 +184,7 @@ export default function App() {
 
     // Timer Effect
     useEffect(() => {
-        let interval: number;
+        let interval: number | undefined;
         if (isRecording) {
             sessionStartTimeRef.current = Date.now();
             interval = window.setInterval(() => {
@@ -166,11 +193,16 @@ export default function App() {
                 const minutes = Math.floor(diff / 60).toString().padStart(2, '0');
                 const seconds = (diff % 60).toString().padStart(2, '0');
                 setElapsedTime(`${minutes}:${seconds}`);
+                finalDurationRef.current = `${minutes}:${seconds}`;
             }, 1000);
         } else {
             setElapsedTime("00:00");
         }
-        return () => clearInterval(interval);
+        return () => {
+            if (interval !== undefined) {
+                clearInterval(interval);
+            }
+        };
     }, [isRecording]);
 
     const toggleCamera = () => {
@@ -192,49 +224,62 @@ export default function App() {
         }
     };
 
-    // --- Practice Mode Functions ---
+    // --- Audio Management ---
 
-    const enterPracticeMode = (correction: Correction) => {
-        setIsPracticeMode(true);
-        setCurrentPractice(correction);
-
-        // NOTE: We don't suspend audioContext here because it would stop the microphone AudioWorklet too!
-        // Instead, we check isPracticeModeRef in onAudioData to skip playing AI audio during practice.
-    };
-
-    const exitPracticeMode = () => {
-        setIsPracticeMode(false);
-        setCurrentPractice(null);
-
-        // CRITICAL: Reset audio schedule to skip any buffered audio from before practice mode
+    // Stop all currently playing/scheduled AI audio and reset the queue
+    const stopAllAudio = () => {
+        for (const src of activeAudioSourcesRef.current) {
+            try { src.stop(); src.disconnect(); } catch (_) { /* already stopped */ }
+        }
+        activeAudioSourcesRef.current.clear();
         if (audioContextRef.current) {
             nextStartTimeRef.current = audioContextRef.current.currentTime;
         }
     };
 
+    // --- Practice Mode Functions ---
+
+    const enterPracticeMode = (correction: Correction) => {
+        stopAllAudio(); // Stop any playing AI audio before entering practice
+        setIsPracticeMode(true);
+        setCurrentPractice(correction);
+    };
+
+    const exitPracticeMode = () => {
+        // Update ref FIRST to prevent race conditions in audio callbacks
+        isPracticeModeRef.current = false;
+
+        stopAllAudio(); // Clean slate for audio after practice
+
+        setIsPracticeMode(false);
+        setCurrentPractice(null);
+    };
+
     // Generate contextual re-prompt to continue conversation
-    const generateContextualReprompt = async () => {
-        console.log("Ask AI More clicked");
-        if (!currentPractice) {
-            alert("Error: No current practice context");
-            return;
-        }
+    const generateContextualReprompt = () => {
+        if (!currentPractice || !liveServiceRef.current) return;
+
         const context = currentPractice.aiContext || "the topic we were discussing";
         const prompt = `Let's continue with ${context}. Can you explain more about why "${currentPractice.corrected}" is better than "${currentPractice.original}"? After explaining, please continue the roleplay naturally.`;
 
-        if (liveServiceRef.current) {
-            try {
-                await liveServiceRef.current.sendTextMessage(prompt);
-                console.log("Message sent successfully");
-            } catch (e) {
-                alert("Failed to send message: " + e);
-                console.error(e);
-            }
-        } else {
-            alert("Error: LiveService not connected");
-        }
-
         exitPracticeMode();
+        // Fire-and-forget: sendTextMessage is now synchronous (returns void internally)
+        liveServiceRef.current.sendTextMessage(prompt);
+    };
+
+    // Debounced setRecentTurns to reduce React re-renders (max ~10fps)
+    const debouncedSetRecentTurns = (newTurns: SubtitleTurn[]) => {
+        pendingTurnsRef.current = newTurns;
+        recentTurnsRef.current = newTurns; // Update ref immediately for consistency
+
+        if (!turnsTimeoutRef.current) {
+            turnsTimeoutRef.current = window.setTimeout(() => {
+                if (pendingTurnsRef.current) {
+                    setRecentTurns(pendingTurnsRef.current);
+                }
+                turnsTimeoutRef.current = null;
+            }, 100); // Limit to ~10fps
+        }
     };
 
     // --- Canvas Rendering Logic ---
@@ -451,9 +496,11 @@ export default function App() {
         if (!streamRef.current) return;
 
         // CRITICAL: Clean up any existing session before starting a new one
+        // Keep local reference before nulling to prevent race conditions
         if (liveServiceRef.current) {
-            liveServiceRef.current.disconnect();
+            const existingService = liveServiceRef.current;
             liveServiceRef.current = null;
+            existingService.disconnect();
         }
 
         setStatus('connecting');
@@ -467,7 +514,11 @@ export default function App() {
 
         // Ensure we close any existing context
         if (audioContextRef.current) {
-            await audioContextRef.current.close();
+            try {
+                await audioContextRef.current.close();
+            } catch (e) {
+                console.warn('AudioContext already closed:', e);
+            }
             audioContextRef.current = null;
         }
 
@@ -486,32 +537,44 @@ export default function App() {
         liveServiceRef.current = new LiveService({
             apiKey: apiKey,
             onAudioData: (buffer) => {
-                // Play AI Audio (skip during practice mode to avoid interference)
                 if (!audioContextRef.current) return;
 
-                // CRITICAL: Skip playing AI audio during practice mode
-                // This allows the microphone to keep working while preventing audio playback
-                if (isPracticeModeRef.current) {
-                    console.log('[PRACTICE MODE] Skipping AI audio playback');
-                    return;
+                const ctx = audioContextRef.current;
+
+                // Ensure AudioContext is running (may be suspended on mobile)
+                if (ctx.state !== 'running') {
+                    ctx.resume();
+                    // Don't drop this buffer — schedule it anyway.
+                    // resume() will allow the scheduled audio to play once running.
                 }
 
-                const source = audioContextRef.current.createBufferSource();
+                // Skip during practice mode
+                if (isPracticeModeRef.current) return;
+
+                const source = ctx.createBufferSource();
                 source.buffer = buffer;
 
-                // CRITICAL: Connect directly to AudioContext.destination for proper system audio routing
-                // This ensures Bluetooth/headset routing works correctly on mobile
-                source.connect(audioContextRef.current.destination);
-
-                // Also connect to Recording Stream (for video recording)
+                // Connect to speakers + recording stream
+                source.connect(ctx.destination);
                 if (aiAudioDestinationRef.current) {
                     source.connect(aiAudioDestinationRef.current);
                 }
 
-                const now = audioContextRef.current.currentTime;
+                const now = ctx.currentTime;
+
+                // Simple scheduling: always chain after the previous chunk.
+                // If the queue has fallen behind (previous audio already finished),
+                // start from now. No heuristic resets — just seamless chaining.
                 const start = Math.max(nextStartTimeRef.current, now);
                 source.start(start);
                 nextStartTimeRef.current = start + buffer.duration;
+
+                // Track active source for cleanup on reset
+                activeAudioSourcesRef.current.add(source);
+                source.onended = () => {
+                    source.disconnect();
+                    activeAudioSourcesRef.current.delete(source);
+                };
             },
             onTranscript: (text, isUser, isFinal) => {
                 const currentRole = isUser ? 'user' : 'ai';
@@ -543,8 +606,7 @@ export default function App() {
                                 text: userTranscriptBufferRef.current,
                                 id: turnIdCounter.current++
                             }].slice(-4);
-                            recentTurnsRef.current = newTurns;
-                            setRecentTurns(newTurns);
+                            debouncedSetRecentTurns(newTurns);
 
                             userTranscriptBufferRef.current = ""; // Clear buffer
                         }
@@ -561,8 +623,7 @@ export default function App() {
                                 text: aiTranscriptBufferRef.current,
                                 id: turnIdCounter.current++
                             }].slice(-4);
-                            recentTurnsRef.current = newTurns;
-                            setRecentTurns(newTurns);
+                            debouncedSetRecentTurns(newTurns);
 
                             aiTranscriptBufferRef.current = ""; // Clear buffer
                         }
@@ -597,14 +658,14 @@ export default function App() {
                         // Check for merge opportunity (fix for fragmented AI speech)
                         const lastTurn = completedTurns[completedTurns.length - 1];
                         if (lastTurn && lastTurn.role === currentRole) {
-                            const bufferStart = textToDisplay.trim().charAt(0);
-                            // If starts with lowercase, it's likely a continuation
-                            if (bufferStart && bufferStart === bufferStart.toLowerCase() && bufferStart !== bufferStart.toUpperCase()) {
-                                // Merge visually
+                            // CRITICAL: Only merge if new text doesn't already contain the old text
+                            // After tool calls, Gemini may send accumulated text that includes previous content
+                            const alreadyContains = textToDisplay.includes(lastTurn.text.trim());
+                            if (!alreadyContains) {
                                 textToDisplay = lastTurn.text + " " + textToDisplay;
-                                // Remove the last finalized turn since we are merging it into the streaming turn
-                                completedTurns = completedTurns.slice(0, -1);
                             }
+                            // Always remove the last turn to avoid double bubbles
+                            completedTurns = completedTurns.slice(0, -1);
                         }
 
                         // Update streaming turn in display
@@ -616,8 +677,7 @@ export default function App() {
 
                         // Remove existing streaming turn before adding new one
                         const newTurns = [...completedTurns, currentStreamingTurn].slice(-4);
-                        recentTurnsRef.current = newTurns;
-                        setRecentTurns(newTurns);
+                        debouncedSetRecentTurns(newTurns);
                     }
                 }
             },
@@ -634,8 +694,8 @@ export default function App() {
                     // If the last entry in history matches current buffer, it was already added
                     const lastEntry = transcriptHistoryRef.current[transcriptHistoryRef.current.length - 1];
                     const alreadyFinalized = lastEntry &&
-                                             lastEntry.role === 'ai' &&
-                                             lastEntry.text === aiTranscriptBufferRef.current;
+                        lastEntry.role === 'ai' &&
+                        lastEntry.text === aiTranscriptBufferRef.current;
 
                     if (!alreadyFinalized) {
                         // Finalize AI turn (first time)
@@ -655,16 +715,50 @@ export default function App() {
                             break;
                         }
                     }
-                    correction.turnIndex = lastUserTurnIndex;
+                    // Handle edge case: if no user turns exist yet, leave turnIndex undefined
+                    // These corrections will still be shown in the final summary
+                    if (lastUserTurnIndex >= 0) {
+                        correction.turnIndex = lastUserTurnIndex;
+                    }
 
-                    // CRITICAL: Use the actual transcript text as "original", not AI's interpretation
-                    // The AI model and transcription service may hear/interpret differently
-                    if (lastUserTurnIndex >= 0 && transcriptHistoryRef.current[lastUserTurnIndex]) {
-                        const actualUserText = transcriptHistoryRef.current[lastUserTurnIndex].text;
-                        if (actualUserText && actualUserText.trim()) {
-                            correction.original = actualUserText.trim();
+                    // Find the user turn that best matches the AI's reported original text
+                    // The last user turn may be just "Go" or "go on" (a prompt), not the actual error
+                    // Search backwards through recent user turns to find the best match
+                    const aiReportedOriginal = correction.original.toLowerCase();
+                    let bestMatchIndex = lastUserTurnIndex;
+                    let bestMatchScore = 0;
+
+                    // Search last 5 user turns for the best match
+                    let userTurnsSeen = 0;
+                    for (let i = transcriptHistoryRef.current.length - 1; i >= 0 && userTurnsSeen < 5; i--) {
+                        if (transcriptHistoryRef.current[i].role !== 'user') continue;
+                        userTurnsSeen++;
+
+                        const turnText = transcriptHistoryRef.current[i].text.toLowerCase();
+                        // Skip very short turns that are likely just prompts ("go", "go on", "continue", etc.)
+                        if (turnText.trim().length <= 6) continue;
+
+                        // Check if this turn contains words from the AI's reported original
+                        const aiWords = aiReportedOriginal.split(/\s+/).filter(w => w.length > 2);
+                        const matchingWords = aiWords.filter(w => turnText.includes(w));
+                        const score = aiWords.length > 0 ? matchingWords.length / aiWords.length : 0;
+
+                        if (score > bestMatchScore) {
+                            bestMatchScore = score;
+                            bestMatchIndex = i;
                         }
                     }
+
+                    // Store full turn text for SessionReport context, but keep AI's short phrase for pill display
+                    if (bestMatchIndex >= 0 && bestMatchScore > 0.3) {
+                        const actualUserText = transcriptHistoryRef.current[bestMatchIndex].text;
+                        if (actualUserText && actualUserText.trim()) {
+                            correction.turnText = actualUserText.trim();
+                            correction.turnIndex = bestMatchIndex;
+                        }
+                    }
+                    // If no good match found, keep the AI's reported original text as-is
+                    // (it's more accurate than a mismatched transcript turn)
 
                     // Only update display if not already finalized
                     if (!alreadyFinalized) {
@@ -675,16 +769,17 @@ export default function App() {
                             text: aiTranscriptBufferRef.current,
                             id: turnIdCounter.current++
                         }].slice(-4);
-                        recentTurnsRef.current = newTurns;
-                        setRecentTurns(newTurns);
+                        debouncedSetRecentTurns(newTurns);
                     }
 
                     aiTranscriptBufferRef.current = ""; // Clear buffer
-                    lastRoleRef.current = null; // Reset so next AI text starts fresh turn
+                    // Do NOT reset lastRoleRef.current here. 
+                    // Keeping it as 'ai' allows subsequent AI speech to merge visually with this turn.
+                    // lastRoleRef.current = null; 
                 }
 
                 // Add to corrections list (keep only last 10 to prevent memory bloat)
-                const newCorrections = [...correctionsRef.current, correction].slice(-10);
+                const newCorrections = [...correctionsRef.current, correction];
                 correctionsRef.current = newCorrections;
                 setCorrections(newCorrections);
                 console.log(`📝 Correction added! Total: ${newCorrections.length}`, correction);
@@ -694,12 +789,38 @@ export default function App() {
             },
             onClose: () => {
                 setStatus('disconnected');
+                // Auto-show session report if connection drops while recording
+                if (isRecordingRef.current) {
+                    if (mediaRecorderRef.current) {
+                        try { mediaRecorderRef.current.stop(); } catch (_) {}
+                    }
+                    setIsRecording(false);
+                    isRecordingRef.current = false;
+                    // Flush transcript buffers
+                    if (userTranscriptBufferRef.current.trim()) {
+                        transcriptHistoryRef.current.push({ role: 'user', text: userTranscriptBufferRef.current });
+                        userTranscriptBufferRef.current = "";
+                    }
+                    if (aiTranscriptBufferRef.current.trim()) {
+                        transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+                        aiTranscriptBufferRef.current = "";
+                    }
+                    if (transcriptHistoryRef.current.length > 0) {
+                        setShowReport(true);
+                    }
+                }
             },
             onError: () => {
                 setStatus('error');
             },
             onReconnecting: () => {
                 setStatus('connecting'); // Show "CONNECTING..." during reconnection
+            },
+            onReconnected: () => {
+                // Stop all stale audio and reset scheduling
+                stopAllAudio();
+                setStatus('connected');
+                console.log('🔄 Reconnected — all audio stopped and queue reset');
             }
         }, ctx);
 
@@ -835,13 +956,44 @@ export default function App() {
     };
 
     const stopRecording = () => {
+        stopAllAudio(); // Immediately silence any playing audio
+
         if (mediaRecorderRef.current && isRecording) {
             mediaRecorderRef.current.stop();
             setIsRecording(false);
+            isRecordingRef.current = false; // Sync ref before disconnect to prevent race condition
         }
+
+        // Finalize duration for the report
+        setElapsedTime(finalDurationRef.current);
+
+        // CRITICAL: Flush any remaining transcript buffers to history
+        // This ensures the final turn is captured even if "turnComplete" hasn't fired yet
+        if (userTranscriptBufferRef.current.trim()) {
+            transcriptHistoryRef.current.push({ role: 'user', text: userTranscriptBufferRef.current });
+            userTranscriptBufferRef.current = "";
+        }
+        if (aiTranscriptBufferRef.current.trim()) {
+            transcriptHistoryRef.current.push({ role: 'ai', text: aiTranscriptBufferRef.current });
+            aiTranscriptBufferRef.current = "";
+        }
+
+        // Show Report instead of full reset
+        if (transcriptHistoryRef.current.length > 0) {
+            setShowReport(true);
+        } else {
+            // Only reset if truly empty
+            resetSession();
+        }
+
         // Ensure we disconnect even if not recording but connected
         liveServiceRef.current?.disconnect();
         setStatus('disconnected');
+    };
+
+    const resetSession = () => {
+        // Stop all playing audio before cleanup
+        stopAllAudio();
 
         // Clean up subtitle state
         userTranscriptBufferRef.current = "";
@@ -850,12 +1002,19 @@ export default function App() {
         recentTurnsRef.current = [];
         setRecentTurns([]);
         turnIdCounter.current = 0;
+        setCorrections([]);
+        setRecordedUrl(null);
+        setShowReport(false);
 
         if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
 
         // Cleanup AudioContext to release hardware
         if (audioContextRef.current) {
-            audioContextRef.current.close();
+            try {
+                audioContextRef.current.close();
+            } catch (e) {
+                console.warn('AudioContext already closed:', e);
+            }
             audioContextRef.current = null;
         }
     };
@@ -942,8 +1101,15 @@ export default function App() {
 
                 {!recordedUrl && (
                     <>
-                        {/* AI Status Indicator - Top Right */}
-                        <div className="absolute top-6 right-6 z-20">
+                        {/* API Status Indicator - Top Right */}
+                        <div className="absolute top-6 right-6 z-20 flex items-center gap-3">
+                            <button
+                                onClick={() => setShowApiKeyModal(true)}
+                                className="p-1.5 rounded-full bg-neutral-800/50 border border-neutral-700 text-gray-400 hover:text-white hover:bg-neutral-700/50 transition-all backdrop-blur-md"
+                                title="API Key Settings"
+                            >
+                                <Key className="w-4 h-4" />
+                            </button>
                             <div className={`px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-2 text-xs font-medium border ${status === 'connected'
                                 ? 'bg-green-500/20 border-green-500/30 text-green-400'
                                 : status === 'connecting'
@@ -971,20 +1137,7 @@ export default function App() {
                 {/* Fixed: Top constraint increased to top-32 to strictly avoid status bar overlap */}
                 <div className="absolute top-32 bottom-0 left-0 right-0 pointer-events-none p-6 flex flex-col justify-end z-30 pb-32 md:pb-24">
                     {recentTurns.map((turn) => (
-                        <div
-                            key={turn.id}
-                            className={`mb-4 max-w-[85%] md:max-w-[60%] p-4 rounded-2xl backdrop-blur-md shadow-lg transition-all duration-500 animate-slide-up ${turn.role === 'user'
-                                ? 'self-start bg-slate-900/90 text-white rounded-bl-none border border-slate-700/50'
-                                : 'self-end bg-blue-900/90 text-white rounded-br-none border border-blue-700/50'
-                                }`}
-                        >
-                            <div className={`text-xs font-bold mb-1 ${turn.role === 'user' ? 'text-slate-400' : 'text-blue-300'}`}>
-                                {turn.role === 'user' ? 'YOU' : 'AI'}
-                            </div>
-                            <div className="text-sm md:text-base leading-relaxed break-words">
-                                {turn.text}
-                            </div>
-                        </div>
+                        <TurnBubble key={turn.id} turn={turn} />
                     ))}
                 </div>
 
@@ -1005,18 +1158,47 @@ export default function App() {
                             value={studyMaterial}
                             onChange={(e) => setStudyMaterial(e.target.value)}
                             placeholder="여기에 학습 자료를 붙여넣으세요 (선택사항)&#10;예: 뉴스 기사, 논문 요약, 읽고 있는 책 내용 등..."
-                            className="w-full max-w-lg h-40 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 mb-6 resize-none text-sm"
+                            className="w-full max-lg h-40 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 mb-4 resize-none text-sm"
                         />
+
+                        {/* Integrated API Key Input */}
+                        <div className="w-full max-w-lg mb-6">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Key className="w-3.5 h-3.5 text-violet-400" />
+                                <span className="text-xs font-semibold text-gray-400 tracking-wider">GEMINI API KEY</span>
+                            </div>
+                            <input
+                                type="password"
+                                value={apiKey}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setApiKey(val);
+                                    if (val.trim()) {
+                                        localStorage.setItem('gemini_api_key', val.trim());
+                                    } else {
+                                        localStorage.removeItem('gemini_api_key');
+                                    }
+                                }}
+                                placeholder="AIzaSy..."
+                                className="w-full bg-neutral-900/60 border border-neutral-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-600/50 transition-all text-sm font-mono"
+                            />
+                        </div>
 
                         <button
                             onClick={startRecording}
-                            className="group relative flex items-center gap-3 bg-gradient-to-r from-violet-600 to-cyan-600 text-white px-8 py-4 rounded-full font-semibold text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_40px_-10px_rgba(139,92,246,0.5)] hover:shadow-[0_0_60px_-10px_rgba(139,92,246,0.7)]"
+                            disabled={!apiKey.trim()}
+                            className={`group relative flex items-center gap-3 px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 shadow-lg ${apiKey.trim()
+                                ? 'bg-gradient-to-r from-violet-600 to-cyan-600 text-white hover:scale-105 shadow-[0_0_40px_-10px_rgba(139,92,246,0.5)] hover:shadow-[0_0_60px_-10px_rgba(139,92,246,0.7)]'
+                                : 'bg-neutral-800 text-gray-500 cursor-not-allowed border border-neutral-700'}`}
                         >
                             <div className="absolute inset-0 rounded-full bg-white/20 group-hover:opacity-100 opacity-0 transition-opacity duration-300" />
-                            <Play className="w-5 h-5 fill-white" />
+                            <Play className={`w-5 h-5 ${apiKey.trim() ? 'fill-white' : 'fill-gray-600'}`} />
                             {studyMaterial.trim() ? "학습 자료로 시작하기" : "자유 대화 시작하기"}
                         </button>
-                        <p className="mt-6 text-xs text-gray-500 font-mono">POWERED BY GEMINI 2.5 FLASH</p>
+                        {!apiKey.trim() && (
+                            <p className="mt-3 text-xs text-red-400 animate-pulse font-medium">※ API Key를 먼저 입력해주세요</p>
+                        )}
+                        <p className="mt-6 text-xs text-gray-500 font-mono text-center uppercase tracking-widest">Powered by Gemini 2.5 Flash Live</p>
                     </div>
                 )}
 
@@ -1078,6 +1260,17 @@ export default function App() {
                     )}
                 </div>
             </main>
+
+            {/* Session Report Modal */}
+            {showReport && (
+                <SessionReport
+                    duration={finalDurationRef.current}
+                    turnCount={transcriptHistoryRef.current.length}
+                    corrections={corrections}
+                    onClose={resetSession}
+                    onCopyTranscript={copyTranscript}
+                />
+            )}
 
             {/* Practice Mode Overlay */}
             {

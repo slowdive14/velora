@@ -37,7 +37,17 @@
       "Bash(xargs kill:*)",
       "Bash(gh auth:*)",
       "Bash(gh run list:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(bash -c:*)",
+      "Bash(powershell -Command \"echo ''{\"\"tool_name\"\":\"\"Read\"\",\"\"tool_input\"\":{}}'' | bash ~/.claude/plugins/local/claude-code-achievements/hooks/track-achievement.sh 2>&1\")",
+      "Bash(bash:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx vite build:*)",
+      "Bash(if not exist \"C:\\\\Users\\\\user\\\\Downloads\\\\gemini-cast\\\\_meta\\\\troubleshooting\" mkdir \"C:\\\\Users\\\\user\\\\Downloads\\\\gemini-cast\\\\_meta\\\\troubleshooting\")",
+      "Bash(npx tsc:*)",
+      "Bash(Select-String -NotMatch \"App_old\")",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

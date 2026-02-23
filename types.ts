@@ -29,6 +29,7 @@ export interface Correction {
   timestamp: number;
   aiContext?: string; // The AI's response text surrounding this correction
   turnIndex?: number; // Which transcript turn this correction belongs to
+  turnText?: string; // Full user turn text for SessionReport context
 }
 
 export interface TranscriptEntry {

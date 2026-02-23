@@ -1,4 +1,4 @@
-import { GoogleGenAI, LiveServerMessage, Modality, Tool, Type } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { base64ToUint8Array, decodeAudioData, float32ToInt16PCM, arrayBufferToBase64 } from '../utils/audioUtils';
 import { Correction } from '../types';
 import { SYSTEM_INSTRUCTION, getStudyMaterialInstruction } from '../constants/prompts';
@@ -11,7 +11,8 @@ interface LiveServiceConfig {
   onCorrection: (correction: Correction) => void;
   onClose: () => void;
   onError: (error: Error) => void;
-  onReconnecting?: () => void; // New callback for reconnection state
+  onReconnecting?: () => void;
+  onReconnected?: () => void;
 }
 
 export class LiveService {
@@ -21,11 +22,12 @@ export class LiveService {
   private audioContext: AudioContext;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 5;
+  private maxReconnectAttempts: number = 3;
   private reconnectTimeout: number | null = null;
   private isReconnecting: boolean = false;
   private lastStudyMaterial: string = '';
   private resumptionToken: string | null = null;
+  private audioDecodeQueue: Promise<void> = Promise.resolve();
 
   constructor(config: LiveServiceConfig, audioContext: AudioContext) {
     this.config = config;
@@ -34,7 +36,6 @@ export class LiveService {
   }
 
   async connect(studyMaterial?: string) {
-    // Store study material for reconnection
     this.lastStudyMaterial = studyMaterial || '';
 
     try {
@@ -44,14 +45,12 @@ export class LiveService {
         systemInstruction = getStudyMaterialInstruction(studyMaterial);
       }
 
-      const tools = TOOLS;
-
       const connectOptions: any = {
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
-          tools: tools,
+          tools: TOOLS,
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
           },
@@ -62,17 +61,14 @@ export class LiveService {
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
-              silenceDurationMs: 300, // Optimized for natural conversation flow (reduced from 400ms)
+              silenceDurationMs: 500,
             }
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          // Enable Context Window Compression for unlimited session duration
-          // Enable Context Window Compression for unlimited session duration
           contextWindowCompression: {
             slidingWindow: {}
           },
-          // Enable Session Resumption
           sessionResumption: {
             ...(this.resumptionToken ? { handle: this.resumptionToken } : {})
           }
@@ -80,220 +76,240 @@ export class LiveService {
 
         callbacks: {
           onopen: () => {
-            console.log('✅ Gemini Live Connected - Session ready');
+            console.log('✅ Gemini Live Connected');
             this.isConnected = true;
             this.isReconnecting = false;
-            this.reconnectAttempts = 0; // Reset on successful connection
+            this.reconnectAttempts = 0;
             if (this.reconnectTimeout) {
               clearTimeout(this.reconnectTimeout);
               this.reconnectTimeout = null;
             }
           },
-          onmessage: this.handleMessage.bind(this),
+          // CRITICAL: Use synchronous handler, process async work in background
+          onmessage: (message: LiveServerMessage) => this.handleMessageSync(message),
           onclose: (event: any) => {
-            console.log('Gemini Live Closed');
-            if (event?.reason) {
-              console.error('Close reason:', event.reason);
-            }
+            console.log('Gemini Live Closed', event?.reason || '');
             this.isConnected = false;
 
-            // Attempt automatic reconnection if not intentionally disconnected
-            // and we haven't exceeded max attempts
             if (!this.isReconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
               this.attemptReconnect();
-            } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-              console.error('❌ Max reconnection attempts reached');
-              this.config.onClose();
             } else {
               this.config.onClose();
             }
           },
           onerror: (err: ErrorEvent) => {
-            console.error('❌ Gemini Live Error:', {
-              message: err.message,
-              error: err.error,
-              type: err.type
-            });
+            console.error('❌ Gemini Live Error:', err.message || err);
             this.isConnected = false;
-            this.config.onError(new Error('Connection error: ' + (err.message || 'Unknown error')));
+            this.config.onError(new Error(err.message || 'Connection error'));
           },
         },
       };
 
-      console.log('🔌 Connecting to Gemini Live...', {
-        hasResumptionToken: !!this.resumptionToken,
-        tokenPreview: this.resumptionToken ? this.resumptionToken.substring(0, 10) + '...' : 'none'
-      });
-
+      console.log('🔌 Connecting to Gemini Live...');
       this.session = await this.ai.live.connect(connectOptions);
     } catch (error) {
-      console.error('❌ Failed to connect to Gemini Live:', error);
+      console.error('❌ Failed to connect:', error);
       this.isConnected = false;
       this.config.onError(error as Error);
     }
   }
 
-  private async handleMessage(message: LiveServerMessage) {
-    // Debug: Log message keys to verify SessionResumptionUpdate
-    // console.log('Rx:', Object.keys(message)); 
-
-    // Handle GoAway Message (Server disconnect warning)
+  // CRITICAL: This must be SYNCHRONOUS - no await in the main path
+  // All async work is fired off without blocking
+  private handleMessageSync(message: LiveServerMessage): void {
+    // Handle GoAway
     if ((message as any).goAway) {
-      console.warn('⚠️ GoAway Message Received:', (message as any).goAway);
+      console.warn('⚠️ GoAway received');
     }
 
-    // Handle Audio
-    const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-    if (audioData) {
-      const uint8 = base64ToUint8Array(audioData);
-      const buffer = await decodeAudioData(uint8, this.audioContext);
-      this.config.onAudioData(buffer);
+    // Handle Audio - process ALL parts, not just the first one
+    const parts = message.serverContent?.modelTurn?.parts;
+    if (parts) {
+      for (const part of parts) {
+        const audioData = part?.inlineData?.data;
+        if (audioData) {
+          this.processAudioAsync(audioData);
+        }
+      }
     }
 
-    // Handle Transcripts
+    // Handle Transcripts - synchronous, no await needed
     const inputTranscript = message.serverContent?.inputTranscription;
     if (inputTranscript) {
       this.config.onTranscript(inputTranscript.text, true, !!message.serverContent?.turnComplete);
     }
 
     const outputTranscript = message.serverContent?.outputTranscription;
-    const turnComplete = !!message.serverContent?.turnComplete;
-
     if (outputTranscript) {
-      this.config.onTranscript(outputTranscript.text, false, turnComplete);
-    } else if (turnComplete) {
-      // CRITICAL: turnComplete without transcript means the turn ended
-      // Send empty string to signal turn completion
-      this.config.onTranscript("", false, true);
+      this.config.onTranscript(outputTranscript.text, false, !!message.serverContent?.turnComplete);
     }
 
-    // Handle Session Resumption Update
+    // Handle Session Resumption - synchronous
     if ((message as any).sessionResumptionUpdate) {
       const update = (message as any).sessionResumptionUpdate;
-      console.log('📦 Session Resumption Update Received:', update);
-
-      if (update.newHandle) {
-        this.resumptionToken = update.newHandle;
-        console.log('📝 Token Saved (newHandle):', this.resumptionToken.substring(0, 20) + '...');
-      } else if (update.sessionResumptionHandle) {
-        this.resumptionToken = update.sessionResumptionHandle;
-        console.log('📝 Token Saved (sessionResumptionHandle):', this.resumptionToken.substring(0, 20) + '...');
-      } else if (update.handle) {
-        this.resumptionToken = update.handle;
-        console.log('📝 Token Saved (handle):', this.resumptionToken.substring(0, 20) + '...');
-      } else {
-        console.warn('⚠️ Session Resumption Update received but no handle found:', update);
+      const token = update.newHandle || update.sessionResumptionHandle || update.handle;
+      if (token) {
+        this.resumptionToken = token;
       }
     }
 
-    // Handle Tool Calls
+    // Handle Tool Calls - fire and forget, don't block
     const toolCall = message.toolCall;
     if (toolCall) {
-      toolCall.functionCalls.forEach(fc => {
-        if (fc.name === 'reportCorrection') {
-          const args = fc.args as any;
-          if (args.original && args.corrected && args.explanation) {
-            const correction: Correction = {
-              original: args.original,
-              corrected: args.corrected,
-              explanation: args.explanation,
-              timestamp: Date.now(),
-              aiContext: "" // Leave empty so App.tsx can populate from transcript buffer
-            };
-            this.config.onCorrection(correction);
-
-            // We must respond to the tool call to keep the session alive
-            this.session.sendToolResponse({
-              functionResponses: [
-                {
-                  id: fc.id,
-                  name: fc.name,
-                  response: { result: "OK" }
-                }
-              ]
-            });
-          }
-        }
-      });
+      console.log('🔧 Tool call received:', JSON.stringify(toolCall).slice(0, 200));
+      this.processToolCallAsync(toolCall);
     }
   }
 
-  async sendAudioChunk(audioData: Float32Array) {
+  // Process audio decoding sequentially to preserve chunk order
+  // Without this, concurrent decodeAudioData calls can finish out of order,
+  // causing multiple onAudioData callbacks to fire simultaneously with the same
+  // currentTime, which makes audio chunks overlap instead of playing sequentially
+  private processAudioAsync(audioData: string): void {
+    this.audioDecodeQueue = this.audioDecodeQueue.then(async () => {
+      try {
+        const uint8 = base64ToUint8Array(audioData);
+        const buffer = await decodeAudioData(uint8, this.audioContext);
+        this.config.onAudioData(buffer);
+      } catch (e) {
+        console.warn('⚠️ Audio decode/playback failed:', e);
+      }
+    });
+  }
+
+  // Process tool calls in background - CRITICAL for not freezing
+  private async processToolCallAsync(toolCall: any): Promise<void> {
+    const functionCalls = toolCall.functionCalls;
+    if (!functionCalls || !Array.isArray(functionCalls)) {
+      console.warn('⚠️ toolCall has no functionCalls array:', toolCall);
+      return;
+    }
+    for (const fc of functionCalls) {
+      console.log(`🔧 Processing: ${fc.name}`, fc.args);
+      // Send tool response IMMEDIATELY - this is what unblocks the AI
+      try {
+        if (!this.session || !this.isConnected) break;
+        this.session.sendToolResponse({
+          functionResponses: [{
+            id: fc.id,
+            name: fc.name,
+            response: { result: "OK" }
+          }]
+        });
+      } catch (e) {
+        console.warn('⚠️ Tool response failed (WebSocket may be closing):', e);
+        this.isConnected = false;
+      }
+
+      // Process correction data
+      if (fc.name === 'reportCorrection') {
+        const args = fc.args as any;
+        if (args?.original && args?.corrected && args?.explanation) {
+          const correction: Correction = {
+            original: args.original,
+            corrected: args.corrected,
+            explanation: args.explanation,
+            timestamp: Date.now(),
+            aiContext: ""
+          };
+          console.log('📝 Firing onCorrection:', correction.original, '→', correction.corrected);
+          this.config.onCorrection(correction);
+        } else {
+          console.warn('⚠️ reportCorrection missing required args:', args);
+        }
+      }
+    }
+  }
+
+  sendAudioChunk(audioData: Float32Array): void {
     if (!this.session || !this.isConnected) return;
 
-    // Expects 16kHz PCM data. 
-    const int16Buffer = float32ToInt16PCM(audioData);
-    const base64 = arrayBufferToBase64(int16Buffer);
-
     try {
-      await this.session.sendRealtimeInput({
+      const int16Buffer = float32ToInt16PCM(audioData);
+      const base64 = arrayBufferToBase64(int16Buffer);
+      this.session.sendRealtimeInput({
         media: {
           mimeType: 'audio/pcm;rate=16000',
           data: base64,
         },
       });
     } catch (e) {
-      console.error("Error sending audio", e);
+      // WebSocket likely in CLOSING/CLOSED state — mark disconnected
+      console.warn('⚠️ sendAudioChunk failed, marking disconnected');
+      this.isConnected = false;
     }
   }
 
-  async sendVideoFrame(base64Image: string) {
+  sendVideoFrame(base64Image: string): void {
     if (!this.session || !this.isConnected) return;
+
     try {
-      await this.session.sendRealtimeInput({
+      this.session.sendRealtimeInput({
         media: {
           mimeType: 'image/jpeg',
           data: base64Image,
         },
       });
     } catch (e) {
-      // Fail silently
+      console.warn('⚠️ sendVideoFrame failed, marking disconnected');
+      this.isConnected = false;
     }
   }
 
-  async sendTextMessage(text: string) {
+  sendTextMessage(text: string): boolean {
     if (!this.session || !this.isConnected) {
-      console.warn("Cannot send text message: Session not connected");
-      return;
+      return false;
     }
-    console.log("Sending text message:", text);
+
     try {
-      await this.session.sendRealtimeInput({
-        text: text
-      });
+      this.session.sendRealtimeInput({ text });
+      return true;
     } catch (e) {
-      console.error("Error sending text message", e);
+      console.warn('⚠️ sendTextMessage failed, marking disconnected');
+      this.isConnected = false;
+      return false;
     }
   }
 
-  private async attemptReconnect() {
+  private attemptReconnect() {
     this.isReconnecting = true;
     this.reconnectAttempts++;
 
-    // Exponential backoff: 2^n seconds (2s, 4s, 8s, 16s, 32s)
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 32000);
-
-    console.log(`🔄 Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 16000);
+    console.log(`🔄 Reconnecting in ${delay}ms...`);
 
     if (this.config.onReconnecting) {
       this.config.onReconnecting();
     }
 
+    // Reset audio decode queue to discard stale chunks from old session
+    this.audioDecodeQueue = Promise.resolve();
+
     this.reconnectTimeout = window.setTimeout(async () => {
       try {
-        console.log(this.resumptionToken ? '🔄 Resuming session with token...' : '🔄 Starting new session...');
         await this.connect(this.lastStudyMaterial);
-        console.log('✅ Reconnection successful');
+
+        if (this.isConnected) {
+          // Notify App to reset audio scheduling state
+          this.config.onReconnected?.();
+
+          // Re-engage AI so user doesn't have to say "go on"
+          // Small delay to let the session stabilize
+          setTimeout(() => {
+            this.sendTextMessage("Please continue where we left off.");
+          }, 500);
+        }
       } catch (error) {
         console.error('❌ Reconnection failed:', error);
-        // onclose will be called again, which will trigger another attempt if under max
       }
     }, delay);
   }
 
   disconnect() {
     this.isConnected = false;
-    this.isReconnecting = false; // Prevent reconnection when intentionally disconnecting
+    this.isReconnecting = false;
+    // Prevent onclose from triggering unwanted reconnection after intentional disconnect
+    this.reconnectAttempts = this.maxReconnectAttempts;
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -304,9 +320,16 @@ export class LiveService {
       try {
         this.session.close();
       } catch (e) {
-        console.log("Error closing session", e);
+        // Ignore
       }
       this.session = null;
     }
+  }
+
+  getConnectionState() {
+    return {
+      connected: this.isConnected,
+      reconnecting: this.isReconnecting
+    };
   }
 }

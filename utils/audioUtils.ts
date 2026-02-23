@@ -25,7 +25,10 @@ export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
 ): Promise<AudioBuffer> {
-  const inputInt16 = new Int16Array(data.buffer);
+  // CRITICAL: Slice the buffer to avoid aliasing — data.buffer may be a larger ArrayBuffer
+  // if the Uint8Array is a view into a shared buffer (common with WebSocket message parsing)
+  const slicedBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  const inputInt16 = new Int16Array(slicedBuffer);
   const float32 = new Float32Array(inputInt16.length);
 
   for (let i = 0; i < inputInt16.length; i++) {
