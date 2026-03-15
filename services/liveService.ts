@@ -92,8 +92,19 @@ export class LiveService {
           // CRITICAL: Use synchronous handler, process async work in background
           onmessage: (message: LiveServerMessage) => this.handleMessageSync(message),
           onclose: (event: any) => {
-            console.log('Gemini Live Closed', event?.reason || '');
+            const reason = event?.reason || '';
+            console.log('Gemini Live Closed', reason);
             this.isConnected = false;
+            this.stopActivityMonitor();
+
+            // Don't reconnect for non-recoverable errors
+            const nonRecoverable = /spending cap|quota|billing|unauthorized|api key|forbidden/i;
+            if (nonRecoverable.test(reason)) {
+              console.error('🚫 Non-recoverable error, stopping reconnection:', reason);
+              this.config.onError(new Error(reason));
+              this.config.onClose();
+              return;
+            }
 
             if (!this.isReconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
               this.attemptReconnect();
