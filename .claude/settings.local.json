@@ -47,7 +47,8 @@
       "Bash(npx tsc:*)",
       "Bash(Select-String -NotMatch \"App_old\")",
       "Bash(netstat:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(grep -r \"timeout\\\\|keepalive\\\\|heartbeat\\\\|ping\" /c/Users/user/Downloads/gemini-cast --include=*.ts --include=*.tsx --include=*.js)"
     ],
     "deny": [],
     "ask": []

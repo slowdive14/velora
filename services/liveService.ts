@@ -22,12 +22,15 @@ export class LiveService {
   private audioContext: AudioContext;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 3;
+  private maxReconnectAttempts: number = 5;
   private reconnectTimeout: number | null = null;
   private isReconnecting: boolean = false;
   private lastStudyMaterial: string = '';
   private resumptionToken: string | null = null;
   private audioDecodeQueue: Promise<void> = Promise.resolve();
+  private lastMessageTime: number = 0;
+  private activityCheckInterval: number | null = null;
+  private readonly ACTIVITY_TIMEOUT_MS = 15000; // 15초 무응답 시 재연결
 
   constructor(config: LiveServiceConfig, audioContext: AudioContext) {
     this.config = config;
@@ -84,6 +87,7 @@ export class LiveService {
               clearTimeout(this.reconnectTimeout);
               this.reconnectTimeout = null;
             }
+            this.startActivityMonitor();
           },
           // CRITICAL: Use synchronous handler, process async work in background
           onmessage: (message: LiveServerMessage) => this.handleMessageSync(message),
@@ -117,9 +121,14 @@ export class LiveService {
   // CRITICAL: This must be SYNCHRONOUS - no await in the main path
   // All async work is fired off without blocking
   private handleMessageSync(message: LiveServerMessage): void {
-    // Handle GoAway
+    // Track activity for zombie connection detection
+    this.lastMessageTime = Date.now();
+
+    // Handle GoAway — server is about to close, reconnect proactively
     if ((message as any).goAway) {
-      console.warn('⚠️ GoAway received');
+      console.warn('⚠️ GoAway received — proactive reconnect');
+      this.handleConnectionLost('goaway');
+      return;
     }
 
     // Handle Audio - process ALL parts, not just the first one
@@ -197,8 +206,9 @@ export class LiveService {
           }]
         });
       } catch (e) {
-        console.warn('⚠️ Tool response failed (WebSocket may be closing):', e);
-        this.isConnected = false;
+        console.warn('⚠️ Tool response failed');
+        this.handleConnectionLost('tool_response_failed');
+        return;
       }
 
       // Process correction data
@@ -234,9 +244,8 @@ export class LiveService {
         },
       });
     } catch (e) {
-      // WebSocket likely in CLOSING/CLOSED state — mark disconnected
-      console.warn('⚠️ sendAudioChunk failed, marking disconnected');
-      this.isConnected = false;
+      console.warn('⚠️ sendAudioChunk failed');
+      this.handleConnectionLost('send_audio_failed');
     }
   }
 
@@ -251,8 +260,8 @@ export class LiveService {
         },
       });
     } catch (e) {
-      console.warn('⚠️ sendVideoFrame failed, marking disconnected');
-      this.isConnected = false;
+      console.warn('⚠️ sendVideoFrame failed');
+      this.handleConnectionLost('send_video_failed');
     }
   }
 
@@ -265,9 +274,48 @@ export class LiveService {
       this.session.sendRealtimeInput({ text });
       return true;
     } catch (e) {
-      console.warn('⚠️ sendTextMessage failed, marking disconnected');
-      this.isConnected = false;
+      console.warn('⚠️ sendTextMessage failed');
+      this.handleConnectionLost('send_text_failed');
       return false;
+    }
+  }
+
+  private handleConnectionLost(reason: string) {
+    if (this.isReconnecting) return;
+    console.warn(`🔌 Connection lost: ${reason}`);
+    this.isConnected = false;
+    this.stopActivityMonitor();
+
+    // Close existing session to clean up
+    if (this.session) {
+      try { this.session.close(); } catch (_) {}
+      this.session = null;
+    }
+
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.attemptReconnect();
+    } else {
+      this.config.onClose();
+    }
+  }
+
+  private startActivityMonitor() {
+    this.stopActivityMonitor();
+    this.lastMessageTime = Date.now();
+    this.activityCheckInterval = window.setInterval(() => {
+      if (!this.isConnected) return;
+      const elapsed = Date.now() - this.lastMessageTime;
+      if (elapsed > this.ACTIVITY_TIMEOUT_MS) {
+        console.warn(`⚠️ No activity for ${elapsed}ms, triggering reconnect`);
+        this.handleConnectionLost('activity_timeout');
+      }
+    }, 5000);
+  }
+
+  private stopActivityMonitor() {
+    if (this.activityCheckInterval) {
+      clearInterval(this.activityCheckInterval);
+      this.activityCheckInterval = null;
     }
   }
 
@@ -308,6 +356,7 @@ export class LiveService {
   disconnect() {
     this.isConnected = false;
     this.isReconnecting = false;
+    this.stopActivityMonitor();
     // Prevent onclose from triggering unwanted reconnection after intentional disconnect
     this.reconnectAttempts = this.maxReconnectAttempts;
 
